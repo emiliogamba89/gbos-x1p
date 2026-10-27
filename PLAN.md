@@ -162,6 +162,8 @@ Principi (ereditati da gbrunch):
    ```
    > Nota: il build citato in origine (17.CL3B.260622.273.R1 / 16471258) è stato sostituito
    > nel catalogo dalla .276.R2. Usare sempre l'MD5 del JSON corrente.
+   → automatizzato da `python tools/fetch_mica.py` (catalogo, download, MD5 zip+bin,
+   dump GPT, estrazione partizioni chiave). Solo stdlib, gira anche da Windows.
 2. **Ispezione GPT**: `sgdisk -p` / `gdisk -l` sull'immagine; montare in loop read-only
    (`losetup -Pr --show -f`) oppure con `7z x` per le partizioni FAT/ext.
 3. **Analisi kernel** (il cuore della fase):
@@ -284,7 +286,7 @@ partisca in un ambiente noto-prima del bare metal.
 | Fase | Stato | Esito |
 |---|---|---|
 | 0 — Ricognizione | ⏸ in attesa | — |
-| 1 — Analisi mica | ⏸ in attesa | — |
+| 1 — Analisi mica | 🟡 strumento pronto (`fetch_mica.py`); download + analisi da eseguire | — |
 | 2 — Boot probe | 🚫 bloccata da F1 | — |
 | 3 — Trial USB | 🚫 | — |
 | 4 — Iterazione | 🚫 | — |
@@ -292,6 +294,6 @@ partisca in un ambiente noto-prima del bare metal.
 
 ## 8. Prossimi passi immediati
 
-1. Preparare `tools/fetch_mica.py` (download + MD5 + estrazione + dump GPT).
+1. ~~Preparare `tools/fetch_mica.py`~~ ✅ **pronto e testato**: `python tools/fetch_mica.py` (catalogo → download con MD5 → estrazione immagine → dump GPT in `reports/mica-analysis/gpt.txt` → estrazione `boot/vendor_boot/vbmeta` in `downloads/mica/extract/`). ~30 GB liberi richiesti.
 2. Preparare `tools/analyze_recovery.sh` (unpack boot/vendor_boot, config kernel, inventario vendor) → produce il report della Fase 1.
 3. In parallelo (Fase 0): creare la USB Ubuntu Concept/Fedora ARM64 e raccogliere `reports/thinkbook-hardware/`.

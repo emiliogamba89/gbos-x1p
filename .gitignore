@@ -5,3 +5,5 @@ tools/bin/
 # Python
 __pycache__/
 *.pyc
+# Recovery Google scaricato e file derivati (MAI committare)
+downloads/
