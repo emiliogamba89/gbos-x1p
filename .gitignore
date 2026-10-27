@@ -1,0 +1,7 @@
+# Reports hardware e dump — NON committare
+reports/
+# Binari ACPICA scaricati da script (tools/collect_hw_windows.py)
+tools/bin/
+# Python
+__pycache__/
+*.pyc
