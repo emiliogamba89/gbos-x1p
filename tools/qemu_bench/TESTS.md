@@ -24,22 +24,28 @@ Il log seriale finisce in `qemu-serial.log`; lo script si autotermina al primo
 | Override 6 moduli | override `modules.load` ridotto | identico al Q1: **l'init non usa quel file** |
 | Override vuoto | `modules.load` + `modules.load.recovery` vuoti | identico: confermato |
 | kvm-arm.mode=nvhe | cmdline q3 | KVM in nVHE ma lista identica |
-| Override `[icc-clk.ko]` | lista da 1 modulo | DA ESEGUIRE |
+| Override `[icc-clk.ko]` | lista da 1 modulo | identico: confermato |
 
-## Punto aperto (rimuovere il reboot 'bootloader')
+## Causa trovata (storia corretta)
 
-La sequenza di caricamento moduli osservata è SEMPRE (fissa):
-`pkvm_drng (blocklist) → qti-regmap-debugfs → icc-clk → clk-qcom → camcc-x1e80100`
-dopo `camcc`: `DebugSymbol: cannot get compatible node` → ~1s → `reboot('bootloader')`.
+1. Il vendor_boot contiene **2 frammenti taggati**: `platform` (kind=1) e
+   `recovery` (kind=2, 60 MB). Il frammento recovery contiene
+   `modules.load.recovery` (108 moduli Qualcomm): **l'init leggeva QUEL file**
+   (recovery mode di default), per questo gli override su `modules.load` erano
+   ignorati.
+2. La **bootconfig** nascosta nel vendor_boot (`androidboot.hardware=android-desktop`,
+   `androidboot.load_modules_parallel=true`) non veniva passata da QEMU.
+3. Il super del recovery È popolato (vendor erofs @5647630336+1024,
+   system_dlkm @8188329984+1024: il superblock EROFS sta a +1024, non
+   allineato a 4096 - il primo check era un falso negativo).
+4. **Config kernel estratta (IKCONFIG)**: `CONFIG_EFI_STUB=y` (F1 confermata),
+   `CONFIG_VIRTIO_PCI=m`, `CONFIG_VIRTIO_BLK=m` (moduli da system_dlkm).
 
-Non dipende da: `modules.load` (sovrascritto senza effetto), `modules.load.recovery`,
-`kvm-arm.mode`. Il binario `/init` non contiene liste hardcoded (verificato).
-Ipotesi correnti: (a) l'init carica per **alias/MODALIAS uevent**, (b) legge il
-file da un path visibile dopo lo switch `first_stage_ramdisk`, (c) l'ordine è
-guidato da `modules.dep`+`modules.alias` indipendente da `modules.load`.
+## Milestone v3 (stile gbos-vm)
 
-`DebugSymbol: cannot get compatible node` + reboot = il probe di `camcc-x1e80100`
-fallisce su hardware assente (QEMU virt) e la policy Google Desktop reboota.
-Questa è una **divergenza attesa su hardware virtuale**: il recovery reale gira
-solo con il suo hardware; per QEMU servirà il vendor rebuild (Milestone Q3,
-approccio gbos-vm) o un init/fstab modificato.
+`build_initrd_v3.py` ricompone l'initrd come blob gzip unico:
+`platform cpio + init cpio + override` (frammento recovery SCARTATO);
+cmdline con tutti gli `androidboot.*`; disco recovery su virtio-blk RO;
+GICv3. Per il disco servono i moduli virtio firmati da system_dlkm:
+`sudo apt install erofs-utils && bash extract_virtio.sh` (in WSL), poi
+`python build_initrd_v3.py` (su Windows, incorpora i moduli) e `run_qemu.sh v3`.

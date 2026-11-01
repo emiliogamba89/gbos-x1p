@@ -52,6 +52,13 @@ GPT_TYPES = {
     "21686148-6449-6E6F-744E-656564454649": "BIOS boot",
 }
 
+# build pinato usato da gbos-vm (super PARTITO: contiene system/vendor/product;
+# il build piu' recente del catalogo ha il super vuoto, il sistema non e' incluso)
+PIN_BUILD = "16471258"
+PIN_URL = "https://dl.google.com/device/recovery/mica-user/16471258/recovery.zip"
+PIN_ZIP_SHA256 = "cb68dd6dbd73e568cfeecca0cbd4ceb23338640814dc3ee52aba5507e5a645d7"
+PIN_BIN_SHA256 = "b0fd614ffe1a088fa3451a4b81c55a73f83e246286184a46ca306250db9af1f1"
+
 
 def md5_file(path):
     h = hashlib.md5()
@@ -78,7 +85,18 @@ def pick(cat, device):
     raise SystemExit(f"[!] device '{device}' non trovato nel catalogo")
 
 
-def download(url, dest, expected_md5=None):
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            b = f.read(CHUNK)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
+
+
+def download(url, dest, expected_md5=None, expected_sha256=None):
     """Download streaming con MD5 progressivo e barra di stato in MB."""
     part = dest + ".part"
     if os.path.exists(dest):
@@ -111,8 +129,13 @@ def download(url, dest, expected_md5=None):
     if expected_md5 and got != expected_md5:
         os.remove(part)
         raise SystemExit(f"[!] MD5 NON valido: {got} != {expected_md5} (download rimosso)")
+    if expected_sha256:
+        got_sha = sha256_file(part)
+        if got_sha != expected_sha256:
+            os.remove(part)
+            raise SystemExit(f"[!] SHA256 NON valido: {got_sha} != {expected_sha256} (download rimosso)")
     os.replace(part, dest)
-    print(f"    MD5 ok ({got}) -> {dest}")
+    print(f"    hash ok (md5 {got}) -> {dest}")
     return dest
 
 
@@ -231,15 +254,19 @@ def main():
         os.makedirs(args.out, exist_ok=True)
         zip_path = os.path.join(args.out, "recovery.zip")
         bin_path = os.path.join(args.out, "android-desktop_signed_recovery_image.bin")
-        if args.skip_download or os.path.exists(bin_path):
-            print(f"[*] pinato: uso {bin_path}")
-        else:
-            download(PIN_URL, zip_path, expected_sha256=PIN_ZIP_SHA256)
+        if not os.path.exists(bin_path):
+            if not os.path.exists(zip_path):
+                raise SystemExit(f"[!] manca {zip_path}: lancia senza --skip-download")
             bin_path = extract_bin(zip_path, args.out)
             got = sha256_file(bin_path)
             if got != PIN_BIN_SHA256:
                 raise SystemExit(f"[!] SHA256 immagine: {got} != {PIN_BIN_SHA256}")
             print("[OK] immagine pinata verificata (sha256 ok)")
+        else:
+            got = sha256_file(bin_path)
+            if got != PIN_BIN_SHA256:
+                raise SystemExit(f"[!] SHA256 immagine esistente: {got} != {PIN_BIN_SHA256}")
+            print("[OK] immagine pinata gia' presente e verificata")
         print("[OK] ora: mica_v4.py + build_initrd_v3.py + extract_virtio.sh (vedi QEMU-BENCH.md)")
         return 0
 
