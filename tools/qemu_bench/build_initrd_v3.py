@@ -53,11 +53,22 @@ def main():
     platform = open(os.path.join(V4, "vendor_0_platform.cpio"), "rb").read()
     init_rd = open(os.path.join(V4, "init_ramdisk.cpio"), "rb").read()
 
-    # override: lista moduli per qemu (sia normale che recovery)
-    # + i metadata dei moduli del platform cpio restano validi (icc-clk non ha dipendenze)
+    # override: lista moduli per qemu (normale e recovery) + moduli virtio
+    # estratti da system_dlkm (se extract_virtio.sh e' stato lanciato in WSL)
+    virtio_dir = os.path.join(V4, "virtio")
+    virtio = sorted(os.listdir(virtio_dir)) if os.path.isdir(virtio_dir) else []
+    load = b"icc-clk.ko\n" + b"".join((m + "\n").encode() for m in virtio)
+
     override = b""
     for path in ("lib/modules/modules.load", "lib/modules/modules.load.recovery"):
-        override += cpio_entry(path, MODULES_LOAD)
+        override += cpio_entry(path, load)
+    for m in virtio:
+        override += cpio_entry("lib/modules/" + m,
+                               open(os.path.join(virtio_dir, m), "rb").read())
+    # entries modules.dep per i moduli aggiunti (senza dipendenze)
+    if virtio:
+        dep_extra = b"".join(("/lib/modules/" + m + ":\n").encode() for m in virtio)
+        override += cpio_entry("lib/modules/modules.dep", dep_extra)
     override += cpio_trailer()
 
     blob = platform + init_rd + override
@@ -67,6 +78,7 @@ def main():
 
     print(f"[OK] initrd_v3.img: {len(img)} byte "
           f"(platform {len(platform)} + init {len(init_rd)} + override {len(override)})")
+    print(f"[OK] moduli in lista: icc-clk.ko{'' if not virtio else ', ' + ', '.join(virtio)}")
     print(f"[OK] cmdline_v3.txt: {CMDLINE_V3[:80]}...")
     return 0
 
