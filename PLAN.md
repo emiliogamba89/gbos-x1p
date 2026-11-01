@@ -285,7 +285,7 @@ partisca in un ambiente noto-prima del bare metal.
 
 | Fase | Stato | Esito |
 |---|---|---|
-| 0 — Ricognizione | ⏸ in attesa | — |
+| 0 — Ricognizione | 🟢 parte Windows completata (vedi `docs/THINKBOOK-HARDWARE.md`); manca la live USB (criterio GO) | ACPI-first confermata |
 | 1 — Analisi mica | 🟡 strumento pronto (`fetch_mica.py`); download + analisi da eseguire | — |
 | 2 — Boot probe | 🚫 bloccata da F1 | — |
 | 3 — Trial USB | 🚫 | — |
