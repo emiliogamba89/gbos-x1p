@@ -11,3 +11,4 @@ __pycache__/
 downloads/
 # artefatto sessione
 .session
+tools/qemu_bench/qemu-serial.log
