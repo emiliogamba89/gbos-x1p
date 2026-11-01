@@ -280,9 +280,9 @@ def main():
         b"    onrestart restart surfaceflinger\n"
         b"    task_profiles ServiceCapacityLow\n",
         "vendor_configs_file")
-    add("etc/vintf/manifest/android.hardware.graphics.composer3.xml",
-        b'<manifest version="9.0" type="device"><hal format="aidl"><name>android.hardware.graphics.composer3</name><version>5</version><fqname>IComposer/default</fqname></hal></manifest>\n',
-        "vendor_configs_file")
+    # NOTA: niente xml composer3: il mica ha già etc/vintf/manifest/hwc3-drm.xml
+    # che dichiara IComposer/default @5; un fragment duplicato rompe il VINTF
+    # e il servicemanager rifiuta OGNI add (anche IBootControl -> vold reboot)
     add("lib64/drm_hwcomposer_atom_reporter.so",
         (ex / "composer" / "lib" / "drm_hwcomposer_atom_reporter.so").read_bytes(),
         "same_process_hal_file")
