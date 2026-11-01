@@ -31,11 +31,11 @@ CMDLINE_V3 = ("console=ttyAMA0,115200 earlycon=pl011,0x9000000 panic=0 root=/dev
               "androidboot.vendor.apex.com.android.hardware.audio.desktop=none")
 
 
-def cpio_entry(name, data):
+def cpio_entry(name, data, mode=0o100644):
     out = bytearray()
     names = name.encode() + b"\x00"
     hdr = "070701"
-    for v in [0, 0o100644, 0, 0, 1, 0, len(data), 0, 0, 0, 0, len(names), 0]:
+    for v in [0, mode, 0, 0, 1, 0, len(data), 0, 0, 0, 0, len(names), 0]:
         hdr += f"{v:08X}"
     out += hdr.encode() + names
     while len(out) % 4:
@@ -75,18 +75,26 @@ def main():
                 break
             def fld(i, p=pos):
                 return int(cpio[p+6+i*8:p+6+(i+1)*8], 16)
-            filesize, namesize = fld(6), fld(11)
+            mode, filesize, namesize = fld(1), fld(6), fld(11)
             name = cpio[pos+110:pos+110+namesize-1].decode(errors="replace")
             dstart = (pos + 110 + namesize + 3) & ~3
             if name == path:
-                return cpio[dstart:dstart+filesize]
+                return mode, cpio[dstart:dstart+filesize]
             pos = (dstart + filesize + 3) & ~3
         return None
 
-    dep_orig = cpio_find(platform, "lib/modules/modules.dep") or b""
+    dep_mode, dep_orig = cpio_find(platform, "lib/modules/modules.dep") or (0o100644, b"")
     dep_extra = b"/lib/modules/virtio_pci.ko: /lib/modules/virtio_pci_legacy_dev.ko /lib/modules/virtio_pci_modern_dev.ko\n"
     dep_extra += b"".join(("/lib/modules/" + m + ":\n").encode()
                           for m in virtio if m != "virtio_pci.ko")
+
+    # fstab del first stage: il mount vendor modificato (vendor_port.py) omette
+    # l'AVB hash obsoleto (come gbos-vm make_mica_gpu_initrd.py)
+    fstab_name = "first_stage_ramdisk/fstab.android-desktop"
+    fstab_mode, fstab = cpio_find(platform, fstab_name) or (0o100644, b"")
+    fstab = b"\n".join(
+        l.replace(b",avb=vbmeta", b"") if l.startswith(b"vendor ") else l
+        for l in fstab.splitlines()) + b"\n"
 
     override = b""
     for path in ("lib/modules/modules.load", "lib/modules/modules.load.recovery"):
@@ -94,7 +102,8 @@ def main():
     for m in virtio:
         override += cpio_entry("lib/modules/" + m,
                                open(os.path.join(virtio_dir, m), "rb").read())
-    override += cpio_entry("lib/modules/modules.dep", dep_orig + dep_extra)
+    override += cpio_entry("lib/modules/modules.dep", dep_orig + dep_extra, dep_mode)
+    override += cpio_entry(fstab_name, fstab, fstab_mode)
     override += cpio_trailer()
 
     blob = platform + init_rd + override
@@ -105,6 +114,7 @@ def main():
     print(f"[OK] initrd_v3.img: {len(img)} byte "
           f"(platform {len(platform)} + init {len(init_rd)} + override {len(override)})")
     print(f"[OK] moduli in lista: icc-clk.ko{'' if not virtio else ', ' + ', '.join(virtio)}")
+    print(f"[OK] fstab: riga vendor senza avb\n    {fstab.decode(errors='replace').strip()[:180]}")
     print(f"[OK] cmdline_v3.txt: {CMDLINE_V3[:80]}...")
     return 0
 
