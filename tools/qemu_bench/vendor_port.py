@@ -121,8 +121,9 @@ def expand_vendor_lp(img, extra_bytes):
     vi = next(i for i, p in enumerate(parts)
               if p[:36].split(b"\0")[0] == b"vendor_a")
     att, fei, num, grp = struct.unpack_from("<IIII", parts[vi], 36)
-    assert num == 1, f"vendor_a ha {num} extents, attesa 1"
-    vend_end = exts[fei][2] + exts[fei][0]
+    assert num >= 1, "vendor_a senza extents"
+    last = exts[fei + num - 1]
+    vend_end = last[2] + last[0]
     deficit = (extra_bytes + 511) // 512
     # gap fisicamente liberi: salta la zona metadata iniziale e i backup
     # metadata finali (ultimi 256 settori del super)
@@ -136,12 +137,12 @@ def expand_vendor_lp(img, extra_bytes):
             break
         prev = max(prev, b)
     assert gap is not None, "nessun gap sufficiente nel super"
-    exts = exts[:fei + 1] + [(deficit, exts[fei][1], gap, exts[fei][3])] + \
-        exts[fei + 1:]
+    ins = fei + num  # le extents della partizione devono restare contigue
+    exts = exts[:ins] + [(deficit, last[1], gap, last[3])] + exts[ins:]
     for j in range(len(parts)):
         a2, f2, n2, g2 = struct.unpack_from("<IIII", parts[j], 36)
         if j == vi:
-            n2 = 2
+            n2 = num + 1
         elif f2 > fei:
             f2 += 1
         parts[j] = parts[j][:36] + struct.pack("<IIII", a2, f2, n2, g2)
@@ -171,6 +172,28 @@ def expand_vendor_lp(img, extra_bytes):
     print(f"[LP] vendor_a +{len(exts) - ec} extent: settori {gap}-{gap + deficit} "
           f"({deficit * 512} byte), @ {off2}")
     return off2, deficit * 512
+
+
+def vendor_extents(img):
+    """Lista [(offset_assoluto, bytes)] delle extents LP della partizione vendor_a."""
+    super_start, _ = gpt_partitions(img)["super"]
+    with open(img, "rb") as f:
+        f.seek(super_start + 12288)
+        m = f.read(65536)
+    u = lambda b, o: struct.unpack_from("<I", b, o)[0]
+    hs = u(m, 8)
+    tables = m[hs:hs + u(m, 44)]
+    ps, pc, psz = struct.unpack_from("<III", m, 80)
+    es, ec, esz = struct.unpack_from("<III", m, 92)
+    all_ext = [struct.unpack_from("<QIQI", tables[es + j * esz: es + (j + 1) * esz])
+               for j in range(ec)]
+    for i in range(pc):
+        p = tables[ps + i * psz: ps + (i + 1) * psz]
+        if p[:36].split(b"\0")[0] == b"vendor_a":
+            _, fei, num, _ = struct.unpack_from("<IIII", p, 36)
+            return [(super_start + all_ext[fei + k][2] * 512,
+                     all_ext[fei + k][0] * 512) for k in range(num)]
+    raise SystemExit("vendor_a non trovata")
 
 
 def main():
@@ -445,8 +468,7 @@ def main():
     # 1.9.4 e sul master: typeflag D ignorato). Le svuotiamo a 0 byte per far
     # spazio alle libs ANGLE (~7 MB). Nessuno dei nostri processi le linka.
     EMPTY_QTI = ["lib64/libgralloc.qti.so", "lib64/libgralloccore.so",
-               "lib64/libgralloctypes.so", "lib64/libgrallocutils.so",
-               "lib64/libdisplayconfig.qti.so",
+               "lib64/libgrallocutils.so",
                "lib64/libsnapdragoncolor-manager.so", "lib64/libsnapdragoncolor-qdcm.so",
                "lib64/vendor.qti.hardware.display.snapalloc-impl.so",
                "lib64/vendor.qti.hardware.display.snapallocext-V1-ndk.so",
@@ -561,27 +583,28 @@ def main():
         print(f"[*] creo la copia scrivibile del disco ({raw.stat().st_size >> 20} MiB)...")
         subprocess.run(["cp", "--sparse=always", str(raw), str(WRITABLE)], check=True)
     vend_size = vend.stat().st_size
-    off2 = pad2 = 0
-    if vend_size > partsize:
-        off2, pad2 = expand_vendor_lp(WRITABLE, vend_size - partsize)
-        partsize += pad2
-    assert vend_size <= partsize, \
-        f"vendor.erofs ({vend_size}) > partizione ({partsize})"
+    ext_list = vendor_extents(WRITABLE)
+    total = sum(b for _, b in ext_list)
+    if vend_size > total:
+        expand_vendor_lp(WRITABLE, vend_size - total)
+        ext_list = vendor_extents(WRITABLE)
+        total = sum(b for _, b in ext_list)
+    assert vend_size <= total, f"vendor.erofs ({vend_size}) > partizione ({total})"
     data = vend.read_bytes()
+    pos = 0
     with WRITABLE.open("r+b") as f:
-        if pad2:
-            f.seek(off)
-            f.write(data[:partsize - pad2])
-            f.seek(off2)
-            f.write(data[partsize - pad2:])
-            f.write(bytes(pad2 - (vend_size - (partsize - pad2))))
-            print(f"[6] vendor patchato scritto in {WRITABLE.name} @ {off} "
-                  f"+ {off2} (extent 2)")
-        else:
-            f.seek(off)
-            f.write(data)
-            f.write(bytes(partsize - vend_size))
-            print(f"[6] vendor patchato scritto in {WRITABLE.name} @ {off}")
+        for o, sz in ext_list:
+            if pos >= vend_size:
+                break
+            chunk = data[pos:pos + sz]
+            f.seek(o)
+            f.write(chunk)
+            if len(chunk) < sz:  # pad coda ultima extent
+                f.write(bytes(sz - len(chunk)))
+            pos += sz
+    print(f"[6] vendor patchato scritto in {WRITABLE.name} @ " +
+          " + ".join(str(o) for o, _ in ext_list) +
+          f" ({len(ext_list)} extents)")
 
     manifest = {
         "source": "official Android CI 16373615 software KeyMint + boot-service.default",
