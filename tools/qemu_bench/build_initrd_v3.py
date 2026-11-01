@@ -26,7 +26,9 @@ CMDLINE_V3 = ("console=ttyAMA0,115200 earlycon=pl011,0x9000000 panic=0 root=/dev
               "androidboot.slot_suffix=_a androidboot.boot_devices=3f000000.pcie "
               "androidboot.baseband=apq androidboot.load_modules_parallel=true "
               "androidboot.vbmeta.device_state=unlocked androidboot.verifiedbootstate=orange "
-              "androidboot.veritymode=enforcing printk.devkmsg=on loglevel=7 ignore_loglevel")
+              "androidboot.veritymode=enforcing printk.devkmsg=on loglevel=7 ignore_loglevel "
+              "androidboot.vendor.apex.com.android.hardware.keymint.strongbox.desktop=none "
+              "androidboot.vendor.apex.com.android.hardware.audio.desktop=none")
 
 
 def cpio_entry(name, data):

@@ -14,6 +14,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 PAYLOAD="$HERE/../../downloads/mica/payload"
 V4="$HERE/../../downloads/mica-16471258/v4"
 RECOVERY="$HERE/../../downloads/mica-16471258/android-desktop_signed_recovery_image.bin"
+WRITABLE="$HERE/../../downloads/mica-16471258/disk-writable.raw"
 LOG="$HERE/qemu-serial.log"
 MODE="${1:-q1}"
 WAIT="${WAIT_SECONDS:-300}"
@@ -29,8 +30,16 @@ case "$MODE" in
   v3) INITRD="$PAYLOAD/initrd_v3.img"
       KERNEL="$V4/kernel.Image"
       MACHINE="virt,gic-version=3,highmem=on,highmem-ecam=off"
-      EXTRA=(-drive "if=none,media=disk,id=driveimage,format=raw,readonly=on,file=$RECOVERY"
-             -device virtio-blk-pci,drive=driveimage
+      if [ "${WRITABLE_DISK:-0}" = "1" ]; then
+        # copia scrivibile (per /metadata e i servizi di sicurezza); creata alla prima occasione
+        [ -f "$WRITABLE" ] || { echo "[*] creo copia scrivibile del disco (17.9GB)..."; \
+          cp --sparse=always "$RECOVERY" "$WRITABLE"; }
+        DISK="$WRITABLE"
+        EXTRA+=(-drive "if=none,media=disk,id=driveimage,format=raw,file=$DISK")
+      else
+        EXTRA+=(-drive "if=none,media=disk,id=driveimage,format=raw,readonly=on,file=$RECOVERY")
+      fi
+      EXTRA+=(-device virtio-blk-pci,drive=driveimage
              -device qemu-xhci,id=xhci
              -device usb-kbd,bus=xhci.0
              -device usb-mouse,bus=xhci.0
