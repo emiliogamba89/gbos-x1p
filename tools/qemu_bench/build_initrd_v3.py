@@ -57,7 +57,34 @@ def main():
     # estratti da system_dlkm (se extract_virtio.sh e' stato lanciato in WSL)
     virtio_dir = os.path.join(V4, "virtio")
     virtio = sorted(os.listdir(virtio_dir)) if os.path.isdir(virtio_dir) else []
+    # virtio_pci dipende da legacy_dev/modern_dev: prima i dev, poi il bus
+    order = ["virtio_blk.ko", "virtio_console.ko", "virtio_pci_legacy_dev.ko",
+             "virtio_pci_modern_dev.ko", "virtio_pci.ko"]
+    virtio = [m for m in order if m in virtio] + \
+             [m for m in virtio if m not in order]
     load = b"icc-clk.ko\n" + b"".join((m + "\n").encode() for m in virtio)
+
+    # modules.dep ORIGINALE del platform cpio (l'init lo usa per risolvere i
+    # nomi) + righe per i moduli virtio aggiunti (senza dipendenze)
+    def cpio_find(cpio, path):
+        pos = 0
+        while pos + 110 <= len(cpio):
+            if cpio[pos:pos+6] != b"070701":
+                break
+            def fld(i, p=pos):
+                return int(cpio[p+6+i*8:p+6+(i+1)*8], 16)
+            filesize, namesize = fld(6), fld(11)
+            name = cpio[pos+110:pos+110+namesize-1].decode(errors="replace")
+            dstart = (pos + 110 + namesize + 3) & ~3
+            if name == path:
+                return cpio[dstart:dstart+filesize]
+            pos = (dstart + filesize + 3) & ~3
+        return None
+
+    dep_orig = cpio_find(platform, "lib/modules/modules.dep") or b""
+    dep_extra = b"/lib/modules/virtio_pci.ko: /lib/modules/virtio_pci_legacy_dev.ko /lib/modules/virtio_pci_modern_dev.ko\n"
+    dep_extra += b"".join(("/lib/modules/" + m + ":\n").encode()
+                          for m in virtio if m != "virtio_pci.ko")
 
     override = b""
     for path in ("lib/modules/modules.load", "lib/modules/modules.load.recovery"):
@@ -65,10 +92,7 @@ def main():
     for m in virtio:
         override += cpio_entry("lib/modules/" + m,
                                open(os.path.join(virtio_dir, m), "rb").read())
-    # entries modules.dep per i moduli aggiunti (senza dipendenze)
-    if virtio:
-        dep_extra = b"".join(("/lib/modules/" + m + ":\n").encode() for m in virtio)
-        override += cpio_entry("lib/modules/modules.dep", dep_extra)
+    override += cpio_entry("lib/modules/modules.dep", dep_orig + dep_extra)
     override += cpio_trailer()
 
     blob = platform + init_rd + override

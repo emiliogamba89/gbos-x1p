@@ -14,8 +14,8 @@ import struct
 import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-RECOVERY = os.path.join(BASE, "downloads", "mica", "android-desktop_signed_recovery_image.bin")
-V4 = os.path.join(BASE, "downloads", "mica", "v4")
+RECOVERY = os.path.join(BASE, "downloads", "mica-16471258", "android-desktop_signed_recovery_image.bin")
+V4 = os.path.join(BASE, "downloads", "mica-16471258", "v4")
 
 LP_HEADER_MAGIC = 0x414C5030
 EROS_MAGIC = b"\xe2\xe1\xf5\xe0"
