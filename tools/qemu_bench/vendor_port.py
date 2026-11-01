@@ -37,13 +37,36 @@ ROOT_NID = 54          # vendor mica root inode (nid), come nel boot log
 EPOCH = 1230768000
 
 
-def lp_vendor_partition(raw):
-    """Parso il super delle dynamic partitions: restituisce (offset, size) di vendor_a."""
-    u = lambda b, o: struct.unpack_from("<I", b, o)[0]
+def gpt_partitions(raw):
+    """GPT: restituisce {nome: (start_byte, end_byte)} assumendo settori 512B."""
     with open(raw, "rb") as f:
-        f.seek(4096); g = f.read(4096)
+        f.seek(512)
+        h = f.read(92)
+        assert h[:8] == b"EFI PART", "header GPT"
+        ent_lba, num_ents, ent_size = struct.unpack_from("<QII", h, 72)
+        out = {}
+        for i in range(num_ents):
+            f.seek(ent_lba * 512 + i * ent_size)
+            e = f.read(ent_size)
+            if e[:16] == bytes(16):
+                continue
+            name = e[56:128].decode("utf-16-le").split("\0")[0]
+            first, last = struct.unpack_from("<QQ", e, 32)
+            out[name] = (first * 512, (last + 1) * 512)
+        return out
+
+
+def lp_vendor_partition(raw):
+    """Parso il metadata LP nella partizione super: restituisce (offset, size) di vendor_a."""
+    u = lambda b, o: struct.unpack_from("<I", b, o)[0]
+    super_start, super_end = gpt_partitions(raw)["super"]
+    super_sectors = (super_end - super_start) // 512
+    with open(raw, "rb") as f:
+        f.seek(super_start + 4096)
+        g = f.read(4096)
         assert u(g, 0) == 0x616c4467, "LP geometry magic"
-        f.seek(12288); m = f.read(u(g, 40))
+        f.seek(super_start + 12288)
+        m = f.read(u(g, 40))
         assert u(m, 0) == 0x414c5030, "LP metadata magic"
         hs = u(m, 8)
         tables = m[hs:hs + u(m, 44)]
@@ -59,7 +82,10 @@ def lp_vendor_partition(raw):
             _, start, num, _ = struct.unpack_from("<IIII", p, 36)
             if num == 1 and name == "vendor_a":
                 e = extents[start]
-                return e[2] * 512, e[1] * 512
+                # nel mica: (num_sectors, 0, physical_lba_relativo_al_super, data_type)
+                if not (0 < e[0] <= super_sectors and e[3] == 0):
+                    raise SystemExit(f"extent vendor_a anomalo: {e}")
+                return super_start + e[2] * 512, e[0] * 512
     raise SystemExit("vendor_a non trovata nelle dynamic partitions")
 
 
@@ -101,7 +127,8 @@ def main():
 
     def node_meta(image, path, off=0):
         """metadata inode: (mode, uid, gid, mtime, xattrs{nome:bytes}) via dump.erofs + lettura diretta."""
-        text = run([dump, f"--offset={off}", "--path=/" + path, image]).stdout.decode()
+        path = "/" + path.lstrip("/") if path != "." else "/"
+        text = run([dump, f"--offset={off}", "--path=" + path, image]).stdout.decode()
         nid = int([l for l in text.splitlines() if l.startswith("NID:")][0].split()[1])
         with open(image, "rb") as f:
             def rd(pos, n):
@@ -166,7 +193,7 @@ def main():
     # build.prop: il desktop VM non ha StrongBox (protected VM) hardware
     b = original("build.prop")
     add("build.prop", b + b"\n# The VM has no StrongBox hardware.\n"
-        "ro.vendor.apex.com.android.hardware.keymint.strongbox.desktop=none\n",
+        b"ro.vendor.apex.com.android.hardware.keymint.strongbox.desktop=none\n",
         "vendor_file", 0o600)
 
     # gate sui coprocessori Qualcomm assenti in VM
@@ -247,7 +274,7 @@ def main():
                      "xattrs": {"security.selinux": b"u:object_r:vendor_file:s0"
                                 if n.startswith("lib64") else b"u:object_r:vendor_configs_file:s0"}}
             else:
-                m = node_meta(orig, "/" + n if n != "." else "/", off)
+                m = node_meta(orig, n)
             ti = tarfile.TarInfo(n)
             ti.type = tarfile.DIRTYPE
             ti.mode = m["mode"] & 0o7777
@@ -303,8 +330,8 @@ def main():
     for n in dirs:
         if n in new_dirs:
             continue
-        got = node_meta(str(vend), "/" + n if n != "." else "/")
-        want = node_meta(orig, "/" + n if n != "." else "/", off)
+        got = node_meta(str(vend), n)
+        want = node_meta(orig, n)
         assert got == want, f"metadata dir cambiata: {n}"
     print("[5] verifica fsck + byte-per-byte: OK")
 
