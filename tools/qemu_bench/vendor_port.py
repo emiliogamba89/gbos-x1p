@@ -318,11 +318,16 @@ def main():
         b'<manifest version="9.0" type="device"><hal format="native"><name>mapper</name><fqname>@5.0/minigbm</fqname></hal></manifest>\n',
         "vendor_configs_file")
     # properties grafiche gbos: rimuovi le righe esistenti e riappendedle
+    # Tentativo ANGLE: EGL via libEGL_angle.so (SwiftShader non esiste in Android 17).
+    # debug.angle.backend=vulkan e' il default di ANGLE; se il log mostra che non
+    # trova un device Vulkan, riprovare con backend opengl.
     props = {"ro.hardware.vulkan": "none", "ro.hwui.use_vulkan": "false",
+             "ro.hardware.egl": "angle", "ro.gfx.angle.supported": "true",
+             "debug.angle.backend": "vulkan",
              "debug.renderengine.backend": "skiaglthreaded",
              "debug.renderengine.vulkan": "false",
              "debug.renderengine.graphite_desktop_optin": "false",
-             "debug.hwui.renderer": "skiagl", "ro.gfx.angle.supported": "false",
+             "debug.hwui.renderer": "skiagl",
              "ro.vendor.hwcomposer.mode": "client",
              "ro.surface_flinger.has_wide_color_display": "false",
              "ro.surface_flinger.has_HDR_display": "false",
