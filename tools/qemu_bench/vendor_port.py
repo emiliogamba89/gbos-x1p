@@ -98,6 +98,81 @@ def crc32c(data):
     return crc
 
 
+def expand_vendor_lp(img, extra_bytes):
+    """Aggiunge una seconda extent LP a vendor_a (metadata slot 0) usando un gap
+    libero del super. Ritorna (offset_assoluto_extent2, bytes_extent2).
+    liblp: extents consecutive per partizione -> shift dei first_extent_index
+    successivi; hash sha256 tabelle @48 e crc32 header @12 (m[16:header_size]).
+    La slot 1 e' il layout dello slot _b: non viene toccata."""
+    u = lambda b, o: struct.unpack_from("<I", b, o)[0]
+    super_start, super_end = gpt_partitions(img)["super"]
+    with open(img, "rb") as f:
+        f.seek(super_start + 12288)
+        m = bytearray(f.read(65536))
+    hs = u(m, 8)
+    tsz = u(m, 44)
+    tables = bytes(m[hs:hs + tsz])
+    desc = lambda o: struct.unpack_from("<III", m, o)
+    ps, pc, psz = desc(80)
+    es, ec, esz = desc(92)
+    parts = [tables[ps + i * psz: ps + (i + 1) * psz] for i in range(pc)]
+    exts = [struct.unpack_from("<QIQI", tables[es + i * esz: es + (i + 1) * esz])
+            for i in range(ec)]
+    vi = next(i for i, p in enumerate(parts)
+              if p[:36].split(b"\0")[0] == b"vendor_a")
+    att, fei, num, grp = struct.unpack_from("<IIII", parts[vi], 36)
+    assert num == 1, f"vendor_a ha {num} extents, attesa 1"
+    vend_end = exts[fei][2] + exts[fei][0]
+    deficit = (extra_bytes + 511) // 512
+    # gap fisicamente liberi: salta la zona metadata iniziale e i backup
+    # metadata finali (ultimi 256 settori del super)
+    rng = sorted((e[2], e[2] + e[0]) for e in exts)
+    prev = rng[0][1]  # END del primo extent (non lo start: gap veri tra extent)
+    gap = None
+    for a, b in rng[1:]:
+        if a > prev and prev >= 2048 and a - prev >= deficit and a <= \
+                (super_end - super_start) // 512 - 256:
+            gap = prev
+            break
+        prev = max(prev, b)
+    assert gap is not None, "nessun gap sufficiente nel super"
+    exts = exts[:fei + 1] + [(deficit, exts[fei][1], gap, exts[fei][3])] + \
+        exts[fei + 1:]
+    for j in range(len(parts)):
+        a2, f2, n2, g2 = struct.unpack_from("<IIII", parts[j], 36)
+        if j == vi:
+            n2 = 2
+        elif f2 > fei:
+            f2 += 1
+        parts[j] = parts[j][:36] + struct.pack("<IIII", a2, f2, n2, g2)
+    pb = b"".join(parts)
+    eb = b"".join(struct.pack("<QIQI", *e) for e in exts)
+    gs, gc, gsz = desc(104)
+    ds, dc, dsz = desc(116)
+    groups = tables[gs:gs + gc * gsz]
+    devices = tables[ds:ds + dc * dsz]
+    nb = pb + eb + groups + devices
+    nd = (0, pc, psz)
+    ne = (len(pb), len(exts), esz)
+    ng = (len(pb) + len(eb), gc, gsz)
+    ndev = (len(pb) + len(eb) + len(groups), dc, dsz)
+    m2 = bytearray(m)
+    m2[44:48] = struct.pack("<I", len(nb))
+    m2[48:80] = hashlib.sha256(nb).digest()
+    m2[hs:hs + len(nb)] = nb
+    for o, d in ((80, nd), (92, ne), (104, ng), (116, ndev)):
+        struct.pack_into("<III", m2, o, *d)
+    import zlib
+    struct.pack_into("<I", m2, 12, zlib.crc32(bytes(m2[16:hs])))
+    with open(img, "r+b") as f:
+        f.seek(super_start + 12288)
+        f.write(m2)
+    off2 = super_start + gap * 512
+    print(f"[LP] vendor_a +{len(exts) - ec} extent: settori {gap}-{gap + deficit} "
+          f"({deficit * 512} byte), @ {off2}")
+    return off2, deficit * 512
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -290,6 +365,13 @@ def main():
               "android.hardware.graphics.allocator-V3-ndk.so",
               "android.hardware.graphics.common-V7-ndk.so"):
         add("lib64/" + n, (ex / "gralloc" / "lib64" / n).read_bytes(), "same_process_hal_file")
+    # ANGLE: il loader EGL cerca SOLO /vendor/lib64/egl/libEGL_<ro.hardware.egl>.so;
+    # le libs ANGLE di Cuttlefish stanno in system/lib64/ senza subdir egl/, quindi
+    # vanno copiate qui sotto lib64/egl/ perche' ro.hardware.egl=angle le trovi
+    for f in ("libEGL_angle.so", "libGLESv1_CM_angle.so", "libGLESv2_angle.so"):
+        add("lib64/egl/" + f,
+            (ex / "cf-system" / "system" / "lib64" / f).read_bytes(),
+            "same_process_hal_file")
     add("bin/hw/android.hardware.graphics.allocator-service.minigbm",
         (ex / "gralloc" / "bin" / "hw" / "android.hardware.graphics.allocator-service.minigbm").read_bytes(),
         "hal_graphics_allocator_default_exec", 0o755)
@@ -358,6 +440,50 @@ def main():
         "vendor_configs_file")
 
     # ---------- 3. overlay.tar (PAX + xattr selinux) ----------
+    # lib QTI display (stack SnapAlloc) orfane: allocator e composer sono sostituiti
+    # da minigbm/CF e il mkfs incremental non supporta removal entries (testato su
+    # 1.9.4 e sul master: typeflag D ignorato). Le svuotiamo a 0 byte per far
+    # spazio alle libs ANGLE (~7 MB). Nessuno dei nostri processi le linka.
+    EMPTY_QTI = ["lib64/libgralloc.qti.so", "lib64/libgralloccore.so",
+               "lib64/libgralloctypes.so", "lib64/libgrallocutils.so",
+               "lib64/libdisplayconfig.qti.so",
+               "lib64/libsnapdragoncolor-manager.so", "lib64/libsnapdragoncolor-qdcm.so",
+               "lib64/vendor.qti.hardware.display.snapalloc-impl.so",
+               "lib64/vendor.qti.hardware.display.snapallocext-V1-ndk.so",
+               "lib64/vendor.display.color@1.0.so", "lib64/vendor.display.color@1.1.so",
+               "lib64/vendor.display.color@1.2.so", "lib64/vendor.display.color@1.3.so",
+               "lib64/vendor.display.color@1.4.so", "lib64/vendor.display.color@1.5.so",
+               "lib64/vendor.display.config@1.0.so", "lib64/vendor.display.config@1.1.so",
+               "lib64/vendor.display.config@1.2.so", "lib64/vendor.display.config@1.3.so",
+               "lib64/vendor.display.config@1.4.so", "lib64/vendor.display.config@1.5.so",
+               "lib64/vendor.display.config@1.6.so", "lib64/vendor.display.config@1.7.so",
+               "lib64/vendor.display.config@1.8.so", "lib64/vendor.display.config@1.9.so",
+               "lib64/vendor.display.config@1.10.so", "lib64/vendor.display.config@1.11.so",
+               "lib64/vendor.display.config@2.0.so", "lib64/vendor.display.postproc@1.0.so",
+               "lib64/vendor.qti.hardware.display.allocator@1.0.so",
+               "lib64/vendor.qti.hardware.display.allocator@3.0.so",
+               "lib64/vendor.qti.hardware.display.color-V1-ndk.so",
+               "lib64/vendor.qti.hardware.display.composer3-V1-ndk.so",
+               "lib64/vendor.qti.hardware.display.composer3-V2-ndk.so",
+               "lib64/vendor.qti.hardware.display.composer3-V3-ndk.so",
+               "lib64/vendor.qti.hardware.display.composer3-V4-ndk.so",
+               "lib64/vendor.qti.hardware.display.composer@1.0.so",
+               "lib64/vendor.qti.hardware.display.composer@2.0.so",
+               "lib64/vendor.qti.hardware.display.demura-V1-ndk.so",
+               "lib64/vendor.qti.hardware.display.mapper@1.0.so",
+               "lib64/vendor.qti.hardware.display.mapper@1.1.so",
+               "lib64/vendor.qti.hardware.display.mapper@2.0.so",
+               "lib64/vendor.qti.hardware.display.mapper@3.0.so",
+               "lib64/vendor.qti.hardware.display.mapper@4.0.so",
+               "lib64/vendor.qti.hardware.display.mapperextensions@1.0.so",
+               "lib64/vendor.qti.hardware.display.mapperextensions@1.1.so",
+               "lib64/vendor.qti.hardware.display.mapperextensions@1.2.so",
+               "lib64/vendor.qti.hardware.display.mapperextensions@1.3.so",
+               "lib64/vendor.qti.hardware.display.postproc-V1-ndk.so"] + [
+               "lib64/vendor.qti.hardware.display.config-V" + str(i) + "-ndk.so"
+               for i in range(1, 18)]
+    for n in EMPTY_QTI:
+        add(n, b"", "vendor_lib_file")
     new_dirs = ["lib64/vm_keymint"]
     base_dirs = [".", "bin", "bin/hw", "etc", "etc/init", "etc/init/hw", "etc/selinux",
                  "etc/vintf", "etc/vintf/manifest", "lib64", "lib64/hw", "lib64/egl"]
@@ -434,13 +560,28 @@ def main():
     if not WRITABLE.exists():
         print(f"[*] creo la copia scrivibile del disco ({raw.stat().st_size >> 20} MiB)...")
         subprocess.run(["cp", "--sparse=always", str(raw), str(WRITABLE)], check=True)
-    assert vend.stat().st_size <= partsize, \
-        f"vendor.erofs ({vend.stat().st_size}) > partizione ({partsize}): serve relocate (non implementato)"
+    vend_size = vend.stat().st_size
+    off2 = pad2 = 0
+    if vend_size > partsize:
+        off2, pad2 = expand_vendor_lp(WRITABLE, vend_size - partsize)
+        partsize += pad2
+    assert vend_size <= partsize, \
+        f"vendor.erofs ({vend_size}) > partizione ({partsize})"
+    data = vend.read_bytes()
     with WRITABLE.open("r+b") as f:
-        f.seek(off)
-        f.write(vend.read_bytes())
-        f.write(bytes(partsize - vend.stat().st_size))
-    print(f"[6] vendor patchato scritto in {WRITABLE.name} @ {off}")
+        if pad2:
+            f.seek(off)
+            f.write(data[:partsize - pad2])
+            f.seek(off2)
+            f.write(data[partsize - pad2:])
+            f.write(bytes(pad2 - (vend_size - (partsize - pad2))))
+            print(f"[6] vendor patchato scritto in {WRITABLE.name} @ {off} "
+                  f"+ {off2} (extent 2)")
+        else:
+            f.seek(off)
+            f.write(data)
+            f.write(bytes(partsize - vend_size))
+            print(f"[6] vendor patchato scritto in {WRITABLE.name} @ {off}")
 
     manifest = {
         "source": "official Android CI 16373615 software KeyMint + boot-service.default",
