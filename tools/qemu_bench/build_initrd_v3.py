@@ -15,7 +15,7 @@ import struct
 import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-V4 = os.path.join(BASE, "downloads", "mica", "v4")
+V4 = os.path.join(BASE, "downloads", "mica-16471258", "v4")
 OUT = os.path.join(BASE, "downloads", "mica", "payload")
 
 # lista moduli per QEMU virt: solo senza catene problematiche

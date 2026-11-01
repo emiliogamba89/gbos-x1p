@@ -221,7 +221,27 @@ def main():
                     help="riusa l'immagine estratta: solo GPT + estrazione partizioni (no MD5 lunghe)")
     ap.add_argument("--delete-zip", action="store_true", help="cancella lo zip dopo l'estrazione")
     ap.add_argument("--out", default=os.path.join(BASE, "downloads", DEVICE))
+    ap.add_argument("--pin-gbos-vm", action="store_true",
+                    help="scarica il build 16471258 pinato di gbos-vm (super con il "
+                         "sistema incluso) invece dell'ultimo build del catalogo")
     args = ap.parse_args()
+
+    if args.pin_gbos_vm:
+        args.out = os.path.join(BASE, "downloads", f"mica-{PIN_BUILD}")
+        os.makedirs(args.out, exist_ok=True)
+        zip_path = os.path.join(args.out, "recovery.zip")
+        bin_path = os.path.join(args.out, "android-desktop_signed_recovery_image.bin")
+        if args.skip_download or os.path.exists(bin_path):
+            print(f"[*] pinato: uso {bin_path}")
+        else:
+            download(PIN_URL, zip_path, expected_sha256=PIN_ZIP_SHA256)
+            bin_path = extract_bin(zip_path, args.out)
+            got = sha256_file(bin_path)
+            if got != PIN_BIN_SHA256:
+                raise SystemExit(f"[!] SHA256 immagine: {got} != {PIN_BIN_SHA256}")
+            print("[OK] immagine pinata verificata (sha256 ok)")
+        print("[OK] ora: mica_v4.py + build_initrd_v3.py + extract_virtio.sh (vedi QEMU-BENCH.md)")
+        return 0
 
     cat = fetch_catalog()
     if args.list:

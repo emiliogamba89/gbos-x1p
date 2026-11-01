@@ -12,8 +12,8 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PAYLOAD="$HERE/../../downloads/mica/payload"
-V4="$HERE/../../downloads/mica/v4"
-RECOVERY="$HERE/../../downloads/mica/android-desktop_signed_recovery_image.bin"
+V4="$HERE/../../downloads/mica-16471258/v4"
+RECOVERY="$HERE/../../downloads/mica-16471258/android-desktop_signed_recovery_image.bin"
 LOG="$HERE/qemu-serial.log"
 MODE="${1:-q1}"
 WAIT="${WAIT_SECONDS:-300}"

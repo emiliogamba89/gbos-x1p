@@ -20,8 +20,8 @@ import sys
 import zlib
 
 BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-RECOVERY = os.path.join(BASE, "downloads", "mica", "android-desktop_signed_recovery_image.bin")
-OUT = os.path.join(BASE, "downloads", "mica", "v4")
+RECOVERY = os.path.join(BASE, "downloads", "mica-16471258", "android-desktop_signed_recovery_image.bin")
+OUT = os.path.join(BASE, "downloads", "mica-16471258", "v4")
 
 u = lambda b, o: struct.unpack_from("<I", b, o)[0]
 align = lambda n, p: (n + p - 1) // p * p

@@ -3,8 +3,8 @@
 # Serve dump.erofs (erofs-utils): installare con  sudo apt install erofs-utils
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-RECOVERY="$HERE/../../downloads/mica/android-desktop_signed_recovery_image.bin"
-V4="$HERE/../../downloads/mica/v4"
+RECOVERY="$HERE/../../downloads/mica-16471258/android-desktop_signed_recovery_image.bin"
+V4="$HERE/../../downloads/mica-16471258/v4"
 
 command -v dump.erofs >/dev/null || { echo "[!] dump.erofs mancante: sudo apt install erofs-utils"; exit 1; }
 [ -f "$V4/gpt-parts.json" ] || { echo "[!] lancia prima mica_v4.py (su Windows)"; exit 1; }
