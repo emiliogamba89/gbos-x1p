@@ -64,7 +64,6 @@ def main():
              "virtio_pci_modern_dev.ko", "virtio_pci.ko"]
     virtio = [m for m in order if m in virtio] + \
              [m for m in virtio if m not in order]
-    load = b"icc-clk.ko\n" + b"".join((m + "\n").encode() for m in virtio)
 
     # modules.dep ORIGINALE del platform cpio (l'init lo usa per risolvere i
     # nomi) + righe per i moduli virtio aggiunti (senza dipendenze)
@@ -83,10 +82,32 @@ def main():
             pos = (dstart + filesize + 3) & ~3
         return None
 
+    # moduli GPU Cuttlefish: virtio-gpu/virtio_input/virtio_dma_buf, vermagic
+    # allineato a quello mica (stessa lunghezza, swap byte-per-byte)
+    cf_mod = os.path.join(BASE, "downloads", "cuttlefish", "extract", "cf-modules")
+    gpu = []
+    for m in ("virtio_dma_buf.ko", "virtio_input.ko", "virtio-gpu.ko"):
+        p = os.path.join(cf_mod, m)
+        if os.path.exists(p):
+            b = open(p, "rb").read()
+            cf_v = b"6.12.74-android16-6-g3ec022196c4e-ab15076761"
+            mica_v = b"6.12.81-android16-6-g08dd7534bf44-ab16287118"
+            assert len(cf_v) == len(mica_v)
+            assert b.count(cf_v) == 1, f"vermagic CF non unico in {m}"
+            b = b.replace(cf_v, mica_v)
+            open(os.path.join(virtio_dir, m), "wb").write(b)
+            gpu.append(m)
+
     dep_mode, dep_orig = cpio_find(platform, "lib/modules/modules.dep") or (0o100644, b"")
     dep_extra = b"/lib/modules/virtio_pci.ko: /lib/modules/virtio_pci_legacy_dev.ko /lib/modules/virtio_pci_modern_dev.ko\n"
+    dep_extra += b"/lib/modules/virtio-gpu.ko: /lib/modules/virtio_dma_buf.ko\n"
     dep_extra += b"".join(("/lib/modules/" + m + ":\n").encode()
                           for m in virtio if m != "virtio_pci.ko")
+
+    # virtio_gpu dipende da virtio_dma_buf: prima dma_buf, poi input, poi gpu
+    gpu_order = ["virtio_dma_buf.ko", "virtio_input.ko", "virtio-gpu.ko"]
+    virtio = virtio + [m for m in gpu_order if m not in virtio]
+    load = b"icc-clk.ko\n" + b"".join((m + "\n").encode() for m in virtio)
 
     # fstab del first stage: il mount vendor modificato (vendor_port.py) omette
     # l'AVB hash obsoleto (come gbos-vm make_mica_gpu_initrd.py)

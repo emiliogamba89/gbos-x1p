@@ -259,7 +259,97 @@ def main():
     add("etc/init/vm-absent-hardware.rc",
         b"on early-init\n"
         b"    stop android.system.desktop.security.gscd\n"
-        b"    stop vendor.secretkeeper.trusty\n",
+        b"    stop vendor.secretkeeper.trusty\n"
+        b"    stop android.system.desktop.security.pinweaver_storaged\n",
+        "vendor_configs_file")
+
+    # ---------- grafica alla gbos-vm (mica_graphics_port.py): minigbm + DRM composer ----------
+    g = HERE.parent.parent / "downloads" / "cuttlefish"
+    ex = g / "extract"
+    add("bin/hw/android.hardware.composer.hwc3-service.drm",
+        (ex / "composer" / "bin" / "hwc3-service.drm").read_bytes(),
+        "hal_graphics_composer_default_exec", 0o755)
+    # service dell'apex, ripuntato sul vendor (stesso corpo del gbos)
+    add("etc/init/android.hardware.composer.hwc3-service.drm.rc",
+        b"service vendor.hwcomposer-3 /vendor/bin/hw/android.hardware.composer.hwc3-service.drm\n"
+        b"    class hal animation\n"
+        b"    interface aidl android.hardware.graphics.composer3.IComposer/default\n"
+        b"    user system\n"
+        b"    group graphics drmrpc\n"
+        b"    capabilities SYS_NICE\n"
+        b"    onrestart restart surfaceflinger\n"
+        b"    task_profiles ServiceCapacityLow\n",
+        "vendor_configs_file")
+    add("etc/vintf/manifest/android.hardware.graphics.composer3.xml",
+        b'<manifest version="9.0" type="device"><hal format="aidl"><name>android.hardware.graphics.composer3</name><version>5</version><fqname>IComposer/default</fqname></hal></manifest>\n',
+        "vendor_configs_file")
+    add("lib64/drm_hwcomposer_atom_reporter.so",
+        (ex / "composer" / "lib" / "drm_hwcomposer_atom_reporter.so").read_bytes(),
+        "same_process_hal_file")
+    for n in ("libminigbm_gralloc.so", "libminigbm_gralloc4_utils.so",
+              "android.hardware.graphics.allocator-V3-ndk.so",
+              "android.hardware.graphics.common-V7-ndk.so"):
+        add("lib64/" + n, (ex / "gralloc" / "lib64" / n).read_bytes(), "same_process_hal_file")
+    add("bin/hw/android.hardware.graphics.allocator-service.minigbm",
+        (ex / "gralloc" / "bin" / "hw" / "android.hardware.graphics.allocator-service.minigbm").read_bytes(),
+        "hal_graphics_allocator_default_exec", 0o755)
+    add("lib64/hw/mapper.minigbm.so",
+        (g / "cf-vendor-files" / "lib64" / "hw" / "mapper.minigbm.so").read_bytes(),
+        "same_process_hal_file")
+    add("lib64/hw/gralloc.default.so",
+        (g / "cf-vendor-files" / "lib64" / "hw" / "gralloc.default.so").read_bytes(),
+        "same_process_hal_file")
+    # l'allocator minigbm sostituisce quello Qualcomm (SnapAlloc, assente in VM):
+    # stesso nome file rc, nuovo binario (come gbos)
+    add("etc/init/vendor.qti.hardware.display.allocator-service.rc",
+        b"# AOSP minigbm replaces the Qualcomm allocator.\n"
+        b"service vendor.graphics.allocator /vendor/bin/hw/android.hardware.graphics.allocator-service.minigbm\n"
+        b"    class hal animation\n"
+        b"    user system\n"
+        b"    group graphics drmrpc\n"
+        b"    capabilities SYS_NICE\n"
+        b"    onrestart restart surfaceflinger\n"
+        b"    task_profiles ServiceCapacityLow\n",
+        "vendor_configs_file")
+    add("etc/vintf/manifest/vendor.qti.hardware.display.allocator-service.xml",
+        b'<manifest version="9.0" type="device"><hal format="aidl"><name>android.hardware.graphics.allocator</name><version>3</version><fqname>IAllocator/default</fqname></hal></manifest>\n',
+        "vendor_configs_file")
+    add("etc/vintf/manifest/mapper.qti.xml",
+        b'<manifest version="9.0" type="device"><hal format="native"><name>mapper</name><fqname>@5.0/minigbm</fqname></hal></manifest>\n',
+        "vendor_configs_file")
+    # properties grafiche gbos: rimuovi le righe esistenti e riappendedle
+    props = {"ro.hardware.vulkan": "none", "ro.hwui.use_vulkan": "false",
+             "debug.renderengine.backend": "skiaglthreaded",
+             "debug.renderengine.vulkan": "false",
+             "debug.renderengine.graphite_desktop_optin": "false",
+             "debug.hwui.renderer": "skiagl", "ro.gfx.angle.supported": "false",
+             "ro.vendor.hwcomposer.mode": "client",
+             "ro.surface_flinger.has_wide_color_display": "false",
+             "ro.surface_flinger.has_HDR_display": "false",
+             "ro.vendor.hwc.drop_drm_master": "0"}
+    bp = files["build.prop"][0].decode()  # contiene già strongbox=none
+    lines = [l for l in bp.splitlines() if l.split("=", 1)[0] not in props]
+    lines += ["# VirGL graphics stack (QEMU virtual GPU)."] + [k + "=" + v for k, v in props.items()]
+    bp_label, bp_mode = files["build.prop"][1], files["build.prop"][2]
+    files["build.prop"] = (("\n".join(lines) + "\n").encode(), bp_label, bp_mode)
+    # label sysfs della GPU emulata (path PCI QEMU machine virt)
+    n = "etc/selinux/vendor_file_contexts"
+    ctx, ctx_label, ctx_mode = files[n]  # contiene già /dev/ttyAMA0
+    add(n, ctx + b"/sys/devices/platform/3f000000\\.pcie/pci0000:00/0000:00:01\\.0(/.*)? u:object_r:sysfs_gpu:s0\n",
+        ctx_label, ctx_mode)
+    add("etc/init/vm-graphics.rc",
+        b"# This path is the QEMU virtual GPU only, not host hardware.\n"
+        b"on init\n"
+        b"    restorecon_recursive /sys/devices/platform/3f000000.pcie/pci0000:00/0000:00:01.0\n"
+        b"    start vm-gpu-state\n"
+        b"\n"
+        b"service vm-gpu-state /system/bin/sh -c \"ls -lZ /dev/dri /sys/class/drm; ls -lZ /sys/bus/pci/devices/0000:00:01.0/; cat /sys/bus/pci/devices/0000:00:01.0/uevent; getprop drm.gpu.vendor_name\"\n"
+        b"    disabled\n"
+        b"    oneshot\n"
+        b"    user shell\n"
+        b"    group shell graphics log readproc\n"
+        b"    seclabel u:r:shell:s0\n"
+        b"    console ttyAMA0\n",
         "vendor_configs_file")
 
     # ---------- 3. overlay.tar (PAX + xattr selinux) ----------

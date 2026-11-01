@@ -8,7 +8,7 @@
 # q2 = payload con override cpio (test lista moduli)
 # v3 = stile gbos-vm: initrd blob unico (platform+init, niente frammento
 #      recovery), cmdline androidboot.*, disco recovery su virtio-blk RO,
-#      GICv3, USB xhci
+#      GICv3, USB xhci, GPU virtio (GPU=0 per ometterla)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PAYLOAD="$HERE/../../downloads/mica/payload"
@@ -39,7 +39,8 @@ case "$MODE" in
       else
         EXTRA+=(-drive "if=none,media=disk,id=driveimage,format=raw,readonly=on,file=$RECOVERY")
       fi
-      EXTRA+=(-device virtio-blk-pci,drive=driveimage
+      EXTRA+=(-device virtio-gpu-pci,xres=1080,yres=1920,max_outputs=1
+             -device virtio-blk-pci,drive=driveimage
              -device qemu-xhci,id=xhci
              -device usb-kbd,bus=xhci.0
              -device usb-mouse,bus=xhci.0
