@@ -1,0 +1,47 @@
+# Mica recovery GPT analysis - 2026-11-01T11:25:46.295267
+# file: android-desktop_signed_recovery_image.bin
+# build: 16560795_CL3B.260622.276.R2  branch: arsp-26Q3-desktop-release
+# md5 catalogo: be97fb4fe368e50bb6102dcede1b2a80
+# md5 zip:  -
+# md5 bin:  -
+# MATCH catalogo: - (extract-only)
+
+ #  nome                 tipo                    inizio(LBA)    fine(LBA)       size
+ 1  userdata             Linux filesystem           28790784     37298127  4154.0Mi
+ 2  KERN-A               Linux filesystem             266240       266240     0.0Mi
+ 3  super                Linux filesystem             344064     25509887 12288.0Mi
+ 4  KERN-B               Linux filesystem             270336       278527     4.0Mi
+ 5  ROOT-B               Linux filesystem             278528       344063    32.0Mi
+ 7  vbmeta_a             88434509-D9D1-487D-B82C-15EF964CBD4B     25509888     25518079     4.0Mi
+ 8  vbmeta_b             88434509-D9D1-487D-B82C-15EF964CBD4B     25518080     25526271     4.0Mi
+ 9  init_boot_a          Linux filesystem           25526272     25542655     8.0Mi
+10  init_boot_b          Linux filesystem           25542656     25559039     8.0Mi
+11  vendor_boot_a        Linux filesystem           25559040     25624575    32.0Mi
+12  vendor_boot_b        Linux filesystem           25624576     25690111    32.0Mi
+13  boot_a               FE3A2A5D-4F32-41A7-B725-ACCC3285A309     25690112     25821183    64.0Mi
+14  boot_b               FE3A2A5D-4F32-41A7-B725-ACCC3285A309     25821184     25952255    64.0Mi
+15  pvmfw_a              Linux filesystem           25952256     25960447     4.0Mi
+16  pvmfw_b              Linux filesystem           25960448     25968639     4.0Mi
+17  dtb_a                Linux filesystem           25968640     25972735     2.0Mi
+18  dtbo_a               Linux filesystem           25972736     25989119     8.0Mi
+19  dtb_b                Linux filesystem           25989120     25993215     2.0Mi
+20  dtbo_b               Linux filesystem           25993216     26009599     8.0Mi
+21  desktop_security_persist Linux filesystem           26009600     26042367    16.0Mi
+22  desktop_security_storage Linux filesystem           26042368     26107903    32.0Mi
+23  misc                 Linux filesystem           26107904     26116095     4.0Mi
+24  metadata             Linux filesystem           26116096     26247167    64.0Mi
+25  recovery_a           Linux filesystem           26247168     26312703    32.0Mi
+26  recovery_b           Linux filesystem           26312704     26378239    32.0Mi
+27  frp_persist          Linux filesystem           26378240     26382335     2.0Mi
+28  modem_a              Linux filesystem           26382336     27099135   350.0Mi
+29  modem_b              Linux filesystem           27099136     27815935   350.0Mi
+30  bluetooth_a          Linux filesystem           27815936     27832319     8.0Mi
+31  bluetooth_b          Linux filesystem           27832320     27848703     8.0Mi
+32  dsp_a                Linux filesystem           27848704     28002303    75.0Mi
+33  dsp_b                Linux filesystem           28004352     28157951    75.0Mi
+34  keymaster_a          Linux filesystem           28160000     28180479    10.0Mi
+35  keymaster_b          Linux filesystem           28180480     28200959    10.0Mi
+36  persist              Linux filesystem           28200960     28266495    32.0Mi
+37  rawdump              66C9B323-F7FC-48B6-BF96-6F32E335A428     28266496     28790783   256.0Mi
+38  ota_recovery_a       Linux filesystem               4096       266239   128.0Mi
+39  ota_recovery_b       Linux filesystem           37298128     37560271   128.0Mi

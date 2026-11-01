@@ -40,7 +40,8 @@ CHUNK = 1024 * 1024
 # partizioni da estrarre per l'analisi kernel (se presenti nel GPT)
 KEY_PARTS = ["boot_a", "boot_b", "vendor_boot_a", "vendor_boot_b",
              "init_boot_a", "init_boot_b", "vbmeta_a", "vbmeta_b",
-             "vendor_kernel_boot_a", "vendor_kernel_boot_b"]
+             "vendor_kernel_boot_a", "vendor_kernel_boot_b",
+             "dtb_a", "dtb_b", "dtbo_a", "dtbo_b"]
 MAX_EXTRACT_SIZE = 512 * 1024 * 1024  # sicurezza: nessuna partizione piu' grande
 
 GPT_TYPES = {
@@ -216,6 +217,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--list", action="store_true", help="mostra il catalogo ed esce")
     ap.add_argument("--skip-download", action="store_true", help="usa file gia' scaricati")
+    ap.add_argument("--extract-only", action="store_true",
+                    help="riusa l'immagine estratta: solo GPT + estrazione partizioni (no MD5 lunghe)")
     ap.add_argument("--delete-zip", action="store_true", help="cancella lo zip dopo l'estrazione")
     ap.add_argument("--out", default=os.path.join(BASE, "downloads", DEVICE))
     args = ap.parse_args()
@@ -227,20 +230,25 @@ def main():
                   f"{e['filesize']/1073741824:6.2f} GiB  md5={e['md5']}")
         return 0
     ent = pick(cat, DEVICE)
-    print(f"[*] device '{DEVICE}': {ent['model']} | build {ent['buildidentifier']} | "
-          f"branch {ent.get('branch','')} | {ent['filesize']/1073741824:.2f} GiB | md5 {ent['md5']}")
+    if not args.extract_only:
+        print(f"[*] device '{DEVICE}': {ent['model']} | build {ent['buildidentifier']} | "
+              f"branch {ent.get('branch','')} | {ent['filesize']/1073741824:.2f} GiB | md5 {ent['md5']}")
 
     os.makedirs(args.out, exist_ok=True)
     rep_dir = os.path.join(BASE, "reports", "mica-analysis")
     os.makedirs(rep_dir, exist_ok=True)
 
     zip_path = os.path.join(args.out, "recovery.zip")
-    if not args.skip_download:
-        download(ent["url"], zip_path, ent["md5"] if ent.get("md5") else None)
+    bin_path = os.path.join(args.out, "android-desktop_signed_recovery_image.bin")
+    if args.extract_only:
+        if not os.path.exists(bin_path):
+            raise SystemExit(f"[!] --extract-only richiede {bin_path} gia' estratto")
     else:
-        print(f"[*] --skip-download: uso {zip_path}")
-
-    bin_path = extract_bin(zip_path, args.out)
+        if not args.skip_download:
+            download(ent["url"], zip_path, ent["md5"] if ent.get("md5") else None)
+        else:
+            print(f"[*] --skip-download: uso {zip_path}")
+        bin_path = extract_bin(zip_path, args.out)
 
     print("[*] calcolo MD5 (zip e immagine) per identificare quale combacia col catalogo ...")
     md5s = {"zip": md5_file(zip_path), "bin": md5_file(bin_path)}
@@ -255,7 +263,20 @@ def main():
 
     print("[*] analisi GPT ...")
     entries, sector = parse_gpt(bin_path)
-    report = gpt_report(entries, sector, bin_path, md5s, ent)
+    if args.extract_only:
+        report = gpt_report(entries, sector, bin_path, {"zip": "-", "bin": "-", "match": "- (extract-only)"}, ent)
+    else:
+        print("[*] calcolo MD5 (zip e immagine) per identificare quale combacia col catalogo ...")
+        md5s = {"zip": md5_file(zip_path) if os.path.exists(zip_path) else "-", "bin": md5_file(bin_path)}
+        target = ent["md5"].lower()
+        if md5s["zip"] == target:
+            md5s["match"] = "ZIP"
+        elif md5s["bin"] == target:
+            md5s["match"] = "BIN (immagine)"
+        else:
+            md5s["match"] = "NESSUNO - ATTENZIONE, file non corrispondente al catalogo!"
+            print(f"[!] {md5s['match']}")
+        report = gpt_report(entries, sector, bin_path, md5s, ent)
     rp = os.path.join(rep_dir, "gpt.txt")
     with open(rp, "w", encoding="utf-8") as f:
         f.write(report)

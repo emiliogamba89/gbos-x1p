@@ -295,5 +295,6 @@ partisca in un ambiente noto-prima del bare metal.
 ## 8. Prossimi passi immediati
 
 1. ~~Preparare `tools/fetch_mica.py`~~ ✅ **pronto e testato**: `python tools/fetch_mica.py` (catalogo → download con MD5 → estrazione immagine → dump GPT in `reports/mica-analysis/gpt.txt` → estrazione `boot/vendor_boot/vbmeta` in `downloads/mica/extract/`). ~30 GB liberi richiesti.
-2. Preparare `tools/analyze_recovery.sh` (unpack boot/vendor_boot, config kernel, inventario vendor) → produce il report della Fase 1.
+2. ~~Preparare `tools/analyze_recovery.sh`~~ ✅ fatto in Python: `tools/analyze_bootimg.py` (formato boot Android 17 decodificato, vendor ramdisk LZ4+cpio inventariato, verdetto F1/F2/F3).
 3. In parallelo (Fase 0): creare la USB Ubuntu Concept/Fedora ARM64 e raccogliere `reports/thinkbook-hardware/`.
+4. **Fase 2 ricalibrata**: banco QEMU ARM64 (gbos-vm style) per confermare F1, poi boot probe su ThinkBook con cmdline overridata (console) e DTB via GRUB `devicetree` o test ACPI.

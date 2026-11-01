@@ -1,5 +1,7 @@
 # Reports hardware e dump — NON committare
-reports/
+reports/*
+# eccezione: report di analisi del recovery mica (solo metadati, committabili)
+!reports/mica-analysis
 # Binari ACPICA scaricati da script (tools/collect_hw_windows.py)
 tools/bin/
 # Python
@@ -7,3 +9,5 @@ __pycache__/
 *.pyc
 # Recovery Google scaricato e file derivati (MAI committare)
 downloads/
+# artefatto sessione
+.session
