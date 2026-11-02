@@ -338,9 +338,17 @@ def main():
             b"    group shell log readproc\n"
             b"    seclabel u:r:shell:s0\n"
             b"    console ttyAMA0\n"
+            b"# il buffer crash e' piccolo e dedicato: reader veloce, righe non perse\n"
+            b"service vm-diagnostic-crash /system/bin/sh -c \"exec /system/bin/logcat -b crash -v threadtime *:V\"\n"
+            b"    class core\n"
+            b"    user shell\n"
+            b"    group shell log readproc\n"
+            b"    seclabel u:r:shell:s0\n"
+            b"    console ttyAMA0\n"
             b"\n"
             b"on init\n"
-            b"    start vm-diagnostic-log\n",
+            b"    start vm-diagnostic-log\n"
+            b"    start vm-diagnostic-crash\n",
             "vendor_configs_file")
 
     # manifest VINTF per il keymint software
