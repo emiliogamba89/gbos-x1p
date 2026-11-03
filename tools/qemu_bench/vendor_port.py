@@ -403,6 +403,15 @@ def main():
         add("lib64/egl/" + f,
             (ex / "cf-system" / "system" / "lib64" / f).read_bytes(),
             "same_process_hal_file")
+    # SwiftShader: in Android 17 non esiste piu' come EGL/GLES, resta solo l'ICD
+    # VULKAN (libvk_swiftshader.so, compilata in locale da build_swiftshader.sh
+    # a partire dai sorgenti upstream). Il loader Android la carica dal namespace
+    # sphal come vulkan.<ro.hardware.vulkan>.so (stesso meccanismo di vulkan.none);
+    # ANGLE gira con backend vulkan SOPRA SwiftShader: catena sf -> angle -> vk-sw.
+    # Label: same_process_hal_file (il sphal la accetta, come le libs ANGLE).
+    add("lib64/hw/vulkan.swiftshader.so",
+        (g / "extract" / "swiftshader" / "libvk_swiftshader.so").read_bytes(),
+        "same_process_hal_file", 0o644)
     add("bin/hw/android.hardware.graphics.allocator-service.minigbm",
         (ex / "gralloc" / "bin" / "hw" / "android.hardware.graphics.allocator-service.minigbm").read_bytes(),
         "hal_graphics_allocator_default_exec", 0o755)
@@ -431,12 +440,13 @@ def main():
         b'<manifest version="9.0" type="device"><hal format="native"><name>mapper</name><fqname>@5.0/minigbm</fqname></hal></manifest>\n',
         "vendor_configs_file")
     # properties grafiche gbos: rimuovi le righe esistenti e riappendedle
-    # Tentativo ANGLE: EGL via libEGL_angle.so (SwiftShader non esiste in Android 17).
-    # debug.angle.backend=vulkan e' il default di ANGLE; se il log mostra che non
-    # trova un device Vulkan, riprovare con backend opengl.
-    props = {"ro.hardware.vulkan": "none", "ro.hwui.use_vulkan": "false",
+    # Stack software: ANGLE backend VULKAN su SwiftShader ICD (libvk_swiftshader).
+    # Il backend opengl di ANGLE e' fallito: in QEMU virt non c'e' nessun driver
+    # GL nativo e SurfaceFlinger abortiva con "no suitable EGLConfig found".
+    # hwui/RenderEngine restano su GL (via ANGLE), non vulkan nativo.
+    props = {"ro.hardware.vulkan": "swiftshader", "ro.hwui.use_vulkan": "false",
              "ro.hardware.egl": "angle", "ro.gfx.angle.supported": "true",
-             "debug.angle.backend": "opengl",
+             "debug.angle.backend": "vulkan",
              "debug.renderengine.backend": "skiaglthreaded",
              "debug.renderengine.vulkan": "false",
              "debug.renderengine.graphite_desktop_optin": "false",
