@@ -436,7 +436,7 @@ def main():
     # trova un device Vulkan, riprovare con backend opengl.
     props = {"ro.hardware.vulkan": "none", "ro.hwui.use_vulkan": "false",
              "ro.hardware.egl": "angle", "ro.gfx.angle.supported": "true",
-             "debug.angle.backend": "vulkan",
+             "debug.angle.backend": "opengl",
              "debug.renderengine.backend": "skiaglthreaded",
              "debug.renderengine.vulkan": "false",
              "debug.renderengine.graphite_desktop_optin": "false",
