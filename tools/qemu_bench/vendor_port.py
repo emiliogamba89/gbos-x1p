@@ -102,7 +102,8 @@ def expand_vendor_lp(img, extra_bytes):
     """Aggiunge una seconda extent LP a vendor_a (metadata slot 0) usando un gap
     libero del super. Ritorna (offset_assoluto_extent2, bytes_extent2).
     liblp: extents consecutive per partizione -> shift dei first_extent_index
-    successivi; hash sha256 tabelle @48 e crc32 header @12 (m[16:header_size]).
+    successivi; hash sha256 tabelle @48 e checksum header @12 =
+    sha256(header[0:12]||32x0||header[44:hs])[:4] LE (formato nuovo LP).
     La slot 1 e' il layout dello slot _b: non viene toccata."""
     u = lambda b, o: struct.unpack_from("<I", b, o)[0]
     super_start, super_end = gpt_partitions(img)["super"]
@@ -136,6 +137,11 @@ def expand_vendor_lp(img, extra_bytes):
             gap = prev
             break
         prev = max(prev, b)
+    if gap is None:
+        # coda del super dopo l'ultima extent (nel mica: ~4.6 GiB liberi)
+        end_lim = (super_end - super_start) // 512 - 256
+        if prev >= 2048 and end_lim - prev >= deficit:
+            gap = prev
     assert gap is not None, "nessun gap sufficiente nel super"
     ins = fei + num  # le extents della partizione devono restare contigue
     exts = exts[:ins] + [(deficit, last[1], gap, last[3])] + exts[ins:]
@@ -163,8 +169,13 @@ def expand_vendor_lp(img, extra_bytes):
     m2[hs:hs + len(nb)] = nb
     for o, d in ((80, nd), (92, ne), (104, ng), (116, ndev)):
         struct.pack_into("<III", m2, o, *d)
-    import zlib
-    struct.pack_into("<I", m2, 12, zlib.crc32(bytes(m2[16:hs])))
+    # formato LP nuovo (header 256B, Android 16/17): il checksum del header e'
+    # sha256(header[0:12] || 32x0 || header[44:hs])[:4] LE (entrambi i campi
+    # @12:16 e @16:44 azzerati nel calcolo; verificato contro il metadata
+    # pristine: il crc32 dello schema vecchio NON e' piu' valido)
+    # il digest e' 32 byte interi: [12:16] = primi 4, [16:44] = restanti 28
+    # (confermato dal disassembly di init: sha256(header con [12:44] azzerato)
+    m2[12:44] = hashlib.sha256(bytes(m2[:12]) + bytes(32) + bytes(m2[44:hs])).digest()
     with open(img, "r+b") as f:
         f.seek(super_start + 12288)
         f.write(m2)
@@ -361,9 +372,16 @@ def main():
         (cf / "boot-service.default").read_bytes(),
         "hal_bootctl_default_exec", 0o755)
 
-    # il VM non ha TPM/Trusty: init li riavvierebbe ogni 5 secondi con tombstone
+    # il VM non ha TPM/Trusty/QSEE: init li riavvierebbe ogni 5 secondi con tombstone.
+    # disable (non solo stop): previene anche i class_start successivi e i restart
     add("etc/init/vm-absent-hardware.rc",
         b"on early-init\n"
+        b"    disable android.system.desktop.security.gscd\n"
+        b"    disable vendor.secretkeeper.trusty\n"
+        b"    disable android.system.desktop.security.pinweaver_storaged\n"
+        b"    disable vendor.minkdaemon\n"
+        b"    disable vendor.weaver_hal\n"
+        b"    disable vendor.qseecomd\n"
         b"    stop android.system.desktop.security.gscd\n"
         b"    stop vendor.secretkeeper.trusty\n"
         b"    stop android.system.desktop.security.pinweaver_storaged\n",
