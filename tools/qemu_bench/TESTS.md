@@ -146,3 +146,41 @@ SwiftShader+ANGLE+minigbm scritto su 2 extents, userdata/metadata azzerate.
 4. il boot DIVERSAMENTE avanza fino ai servizi (keystore2 attende
    boot_completed; userdata formattata; composer/allocator registrati).
 
+## Svolta 2026-11-05 (2) — virtio-gpu-gl-pci funziona; percorso gbos-vm definitivo
+
+### Trovato il riferimento che FUNZIONA
+`downloads/reference-gbos-vm/` e' la ricetta completa (macOS/hvf) gia' collaudata:
+- QEMU: `-device virtio-gpu-gl-pci,hostmem=8G,blob=true,venus=true` + spice gl=es
+  (run/run_vm.py:98) + un virgl_render_server lato host;
+- vendor (image/mica_graphics_port.py:8,40): **Mesa VirGL** come EGL
+  (ro.hardware.egl=virgl, libEGL_virgl/libGLESv1_CM_virgl/libGLESv2_virgl/
+  libgallium_dri/libdrm), **ro.hardware.vulkan=none** (NIENTE ICD Vulkan),
+  ro.gfx.angle.supported=false, RenderEngine skia-GL (identico al nostro);
+- build-guest.sh: Mesa cross-compilata con meson per Android aarch64
+  (api 35, llvm=disabled, glx/gbm=disabled, platforms=android).
+
+### Cosa abbiamo gia' ottenuto nel banco WSL
+- QEMU Debian 8.2.2 AArch64 HA virtio-gpu-gl-pci (modulo hw-display-virtio-gpu-pci-gl.so);
+  richiede LD_PRELOAD=/usr/lib/aarch64-linux-gnu/qemu/ui-opengl.so (definisce
+  qemu_egl_display; egl-headless NON basta perche' non init EGL display);
+  display: -display gtk,gl=on (finestra WSLg su X11; egl-headless fallisce:
+  manca /dev/dri render node su WSL, c'e' solo /dev/dxg);
+- il guest ora negozia **+virgl, cap sets: 2 (virgl id1 + venus id2)**
+  (prima: -virgl, cap sets: 0 col device plain);
+- sf crasha IDENTICO anche con virgl -> il crash e' nel vendor stack
+  ANGLE+SwiftShader, NON nel device QEMU.
+
+### Piano definitivo (prossima sessione)
+1. Adattare build-guest.sh a WSL/Linux: bison da apt, meson via pip venv,
+   NDK r27c locale (~/Android/android-ndk-r27c), sysroot shim come per
+   SwiftShader; output atteso: libEGL_virgl.so, libGLESv1_CM_virgl.so,
+   libGLESv2_virgl.so, libgallium_dri.so, libdrm.so (+ eventuale venus).
+2. vendor_port: nuova variante grafica "gbos-vm" che replica mica_graphics_port.py
+   (file Mesa in lib64/egl + lib64, props virgl/none/angle=false) — gia' uno
+   switch 1:1 perche' il resto (minigbm, composer drc, keymint software) e'
+   comune.
+3. Test: sf dovrebbe superare init/display/composizione senza crash; poi
+   boot_completed + launcher.
+4. Ricaduta utile: venus (Vulkan guest->host) disponibile per dopo senza
+   ricompilare QEMU.
+

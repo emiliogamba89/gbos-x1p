@@ -39,7 +39,7 @@ case "$MODE" in
       else
         EXTRA+=(-drive "if=none,media=disk,id=driveimage,format=raw,readonly=on,file=$RECOVERY")
       fi
-      EXTRA+=(-device virtio-gpu-pci,xres=1080,yres=1920,max_outputs=1
+      EXTRA+=(-device virtio-gpu-gl-pci,xres=1080,yres=1920,max_outputs=1
              -device virtio-blk-pci,drive=driveimage
              -device qemu-xhci,id=xhci
              -device usb-kbd,bus=xhci.0
@@ -51,7 +51,7 @@ echo "[*] cmdline ($MODE): $CMDLINE"
 echo "[*] log seriale: $LOG (attendo max ${WAIT}s)"
 rm -f "$LOG"
 
-qemu-system-aarch64 \
+LD_PRELOAD=/usr/lib/aarch64-linux-gnu/qemu/ui-opengl.so qemu-system-aarch64 \
   -machine "$MACHINE" \
   -cpu cortex-a76 \
   -m 4G -smp 4 \
@@ -59,7 +59,7 @@ qemu-system-aarch64 \
   -kernel "$KERNEL" \
   -initrd "$INITRD" \
   -append "$CMDLINE" \
-  -display none -serial "file:$LOG" \
+  -display gtk,gl=on -serial "file:$LOG" \
   "${EXTRA[@]}" &
 QPID=$!
 
