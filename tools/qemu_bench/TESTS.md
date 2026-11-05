@@ -184,3 +184,39 @@ SwiftShader+ANGLE+minigbm scritto su 2 extents, userdata/metadata azzerate.
 4. Ricaduta utile: venus (Vulkan guest->host) disponibile per dopo senza
    ricompilare QEMU.
 
+## RISOLTO 2026-11-05 (3) — il crash di sf era il caricatore EGL in sphal
+
+La root cause di TUTTI i crash di SurfaceFlinger era una sola: **il
+caricatore EGL lato sf non riusciva a caricare il driver GL dal namespace
+sphal** e sf abortiva ("couldn't find an OpenGL ES implementation" /
+"no suitable EGLConfig"):
+- ANGLE+SwiftShader: dlopen falliva in cascata (libandroid.so, sync_wait,
+  __android_log_write non raggiungibili in sphal — risolti con lo stub
+  libandroid.so) ma il crash rimaneva;
+- Mesa VirGL (build WSL, build_mesa_*.sh): falliva su libc++_shared.so
+  -> refuso del mio cross-file: la ricetta gbos-vm usa -static-libstdc++
+  (libc++ statica, zero dipendenze runtime). Ripristinato il flag.
+
+### Variante grafica virgl (default) in vendor_port.py
+`--graphics virgl` (default) vs `--graphics swiftshader` (diagnostico):
+- libs: lib64/egl/{libEGL,libGLESv1_CM,libGLESv2}_virgl.so + libgallium_dri.so
+  + libdrm.so (downloads/mesa-virgl/, ~17.7 MB il gallium) — label
+  same_process_hal_file
+- props: ro.hardware.egl=virgl, ro.hardware.vulkan=none,
+  ro.gfx.angle.supported=false (identici a mica_graphics_port.py)
+
+### Boot verificato (run 45 min, poi chiuso per timeout)
+- zygote 565s, sf 709s: ZERO crash (prima moriva a ~160-210s dal via)
+- bootanim AVVIATA da sf (pid dedicato, usa IAllocator) = stack grafico
+  end-to-end funzionante (sf -> RenderEngine skia-GL su Mesa VirGL ->
+  gralloc minigbm -> composer drc -> scanout)
+- system_server partito ~2200s (36 min wall sotto TCG), inizializzava i
+  servizi di sistema quando lo script ha chiuso per timeout
+- avvio QEMU con GL: virtio-gpu-gl-pci richiede LD_PRELOAD ui-opengl.so
+  e -display gtk,gl=on (egl-headless senza /dev/dri non parte su WSL)
+
+### Da fare
+- run lungo (boot_long.bat, WAIT_SECONDS=5400) fino a boot_completed + UI
+- dopo la conferma: ripristinare le performance (TCG resta lento; valuta
+  -smp 6/8 e l'eventuale venus per Vulkan guest)
+

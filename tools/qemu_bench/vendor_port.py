@@ -213,6 +213,9 @@ def main():
     ap.add_argument("--raw", required=True, help="immagine recovery mica originale")
     ap.add_argument("--cf", required=True, help="cartella con i file estratti da Cuttlefish")
     ap.add_argument("--erofs-bin", required=True, help="cartella bin di erofs-utils 1.9.4")
+    ap.add_argument("--graphics", choices=("virgl", "swiftshader"), default="virgl",
+                    help="stack grafico: virgl = Mesa VirGL (ricetta gbos-vm, default); "
+                         "swiftshader = ANGLE+SwiftShader CPU (diagnostico)")
     ap.add_argument("--no-diagnostic", action="store_true",
                     help="salta il logger seriale vm-diagnostic-log")
     args = ap.parse_args()
@@ -478,28 +481,42 @@ def main():
         add("lib64/" + n, (ex / "gralloc" / "lib64" / n).read_bytes(), "same_process_hal_file")
     # ANGLE: il loader EGL cerca SOLO /vendor/lib64/egl/libEGL_<ro.hardware.egl>.so;
     # le libs ANGLE di Cuttlefish stanno in system/lib64/ senza subdir egl/, quindi
-    # vanno copiate qui sotto lib64/egl/ perche' ro.hardware.egl=angle le trovi
-    for f in ("libEGL_angle.so", "libGLESv1_CM_angle.so", "libGLESv2_angle.so"):
-        add("lib64/egl/" + f,
-            (ex / "cf-system" / "system" / "lib64" / f).read_bytes(),
+    # vanno copiate qui sotto lib64/egl/ perche' ro.hardware.egl=angle le trovi.
+    # Due varianti grafiche:
+    # - virgl (default, ricetta gbos-vm collaudata): Mesa VirGL come EGL/GLES
+    #   (virglrenderer su host via virtio-gpu-gl-pci), NIENTE ICD Vulkan
+    #   (ro.hardware.vulkan=none), ANGLE disattivato. sf crashava con
+    #   ANGLE+SwiftShader (SIGABRT silenzioso ~150-210s dal via).
+    # - swiftshader (diagnostico): ANGLE backend vulkan su SwiftShader CPU.
+    mesa = HERE.parent.parent / "downloads" / "mesa-virgl"
+    if args.graphics == "virgl":
+        for n in ("libEGL_virgl.so", "libGLESv1_CM_virgl.so", "libGLESv2_virgl.so"):
+            add("lib64/egl/" + n, (mesa / n).read_bytes(), "same_process_hal_file")
+        add("lib64/libgallium_dri.so", (mesa / "libgallium_dri.so").read_bytes(),
             "same_process_hal_file")
-    # SwiftShader: in Android 17 non esiste piu' come EGL/GLES, resta solo l'ICD
-    # VULKAN (libvk_swiftshader.so, compilata in locale da build_swiftshader.sh
-    # a partire dai sorgenti upstream). Il loader Android la carica dal namespace
-    # sphal come vulkan.<ro.hardware.vulkan>.so (stesso meccanismo di vulkan.none);
-    # ANGLE gira con backend vulkan SOPRA SwiftShader: catena sf -> angle -> vk-sw.
-    # Label: same_process_hal_file (il sphal la accetta, come le libs ANGLE).
-    add("lib64/hw/vulkan.swiftshader.so",
-        (g / "extract" / "swiftshader" / "libvk_swiftshader.so").read_bytes(),
-        "same_process_hal_file", 0o644)
-    # stub libandroid.so: vulkan.swiftshader.so dichiara DT_NEEDED libandroid.so
-    # ma sphal NON puo' caricare le NDK app libs di sistema -> dlopen falliva
-    # ("library libandroid.so not found"). Serve solo AHardwareBuffer_
-    # createFromHandle: lo stub ritorna NULL, le altre AHardwareBuffer_* risolvono
-    # da libnativewindow (sphal-visible). Costo: niente import AHB via handle.
-    add("lib64/libandroid.so",
-        (g / "extract" / "swiftshader" / "libandroid.so").read_bytes(),
-        "same_process_hal_file", 0o644)
+        add("lib64/libdrm.so", (mesa / "libdrm.so").read_bytes(), "same_process_hal_file")
+    else:
+        for f in ("libEGL_angle.so", "libGLESv1_CM_angle.so", "libGLESv2_angle.so"):
+            add("lib64/egl/" + f,
+                (ex / "cf-system" / "system" / "lib64" / f).read_bytes(),
+                "same_process_hal_file")
+        # SwiftShader: in Android 17 non esiste piu' come EGL/GLES, resta solo l'ICD
+        # VULKAN (libvk_swiftshader.so, compilata in locale da build_swiftshader.sh
+        # a partire dai sorgenti upstream). Il loader Android la carica dal namespace
+        # sphal come vulkan.<ro.hardware.vulkan>.so (stesso meccanismo di vulkan.none);
+        # ANGLE gira con backend vulkan SOPRA SwiftShader: catena sf -> angle -> vk-sw.
+        # Label: same_process_hal_file (il sphal la accetta, come le libs ANGLE).
+        add("lib64/hw/vulkan.swiftshader.so",
+            (g / "extract" / "swiftshader" / "libvk_swiftshader.so").read_bytes(),
+            "same_process_hal_file", 0o644)
+        # stub libandroid.so: vulkan.swiftshader.so dichiara DT_NEEDED libandroid.so
+        # ma sphal NON puo' caricare le NDK app libs di sistema -> dlopen falliva
+        # ("library libandroid.so not found"). Serve solo AHardwareBuffer_
+        # createFromHandle: lo stub ritorna NULL, le altre AHardwareBuffer_* risolvono
+        # da libnativewindow (sphal-visible). Costo: niente import AHB via handle.
+        add("lib64/libandroid.so",
+            (g / "extract" / "swiftshader" / "libandroid.so").read_bytes(),
+            "same_process_hal_file", 0o644)
     # sonda EGL: logga i passi della catena display->ANGLE->vulkan su logcat
     # (-> console seriale). Label compositore: dominio con transizione definita.
     add("bin/vm-egltest",
@@ -540,22 +557,25 @@ def main():
         b'<manifest version="9.0" type="device"><hal format="native"><name>mapper</name><fqname>@5.0/minigbm</fqname></hal></manifest>\n',
         "vendor_configs_file")
     # properties grafiche gbos: rimuovi le righe esistenti e riappendedle
-    # Stack software: ANGLE backend VULKAN su SwiftShader ICD (libvk_swiftshader).
-    # Il backend opengl di ANGLE e' fallito: in QEMU virt non c'e' nessun driver
+    # properties grafiche: virgl = ricetta gbos-vm; swiftshader = ANGLE su CPU.
+    # Il backend opengl di ANGLE era fallito: in QEMU virt non c'e' nessun driver
     # GL nativo e SurfaceFlinger abortiva con "no suitable EGLConfig found".
-    # hwui/RenderEngine restano su GL (via ANGLE), non vulkan nativo.
-    props = {"ro.hardware.vulkan": "swiftshader", "ro.hwui.use_vulkan": "false",
-             "ro.hardware.egl": "angle", "ro.gfx.angle.supported": "true",
-             "debug.angle.backend": "vulkan",
-             "debug.renderengine.backend": "skiaglthreaded",
+    # hwui/RenderEngine restano su GL in entrambe le varianti.
+    if args.graphics == "virgl":
+        props = {"ro.hardware.vulkan": "none", "ro.hwui.use_vulkan": "false",
+                 "ro.hardware.egl": "virgl", "ro.gfx.angle.supported": "false"}
+    else:
+        props = {"ro.hardware.vulkan": "swiftshader", "ro.hwui.use_vulkan": "false",
+                 "ro.hardware.egl": "angle", "ro.gfx.angle.supported": "true",
+                 "debug.angle.backend": "vulkan"}
+    props.update({"debug.renderengine.backend": "skiaglthreaded",
              "debug.renderengine.vulkan": "false",
              "debug.renderengine.graphite_desktop_optin": "false",
              "debug.hwui.renderer": "skiagl",
-             "debug.sf.disable_client_composition": "1",
              "ro.vendor.hwcomposer.mode": "client",
              "ro.surface_flinger.has_wide_color_display": "false",
              "ro.surface_flinger.has_HDR_display": "false",
-             "ro.vendor.hwc.drop_drm_master": "0"}
+             "ro.vendor.hwc.drop_drm_master": "0"})
     bp = files["build.prop"][0].decode()  # contiene già strongbox=none
     lines = [l for l in bp.splitlines() if l.split("=", 1)[0] not in props]
     lines += ["# VirGL graphics stack (QEMU virtual GPU)."] + [k + "=" + v for k, v in props.items()]
