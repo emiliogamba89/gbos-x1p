@@ -373,18 +373,80 @@ def main():
         "hal_bootctl_default_exec", 0o755)
 
     # il VM non ha TPM/Trusty/QSEE: init li riavvierebbe ogni 5 secondi con tombstone.
-    # disable (non solo stop): previene anche i class_start successivi e i restart
+    # NOTA: questo init NON supporta il comando `disable` in un blocco azione
+    # ("Invalid keyword 'disable'"): si usa stop e, per i servizi vendor che
+    # ripartono comunque (start espliciti/class_start), si svuota il rc che li
+    # definisce — ogni riferimento esterno diventa un no-op innocuo.
     add("etc/init/vm-absent-hardware.rc",
         b"on early-init\n"
-        b"    disable android.system.desktop.security.gscd\n"
-        b"    disable vendor.secretkeeper.trusty\n"
-        b"    disable android.system.desktop.security.pinweaver_storaged\n"
-        b"    disable vendor.minkdaemon\n"
-        b"    disable vendor.weaver_hal\n"
-        b"    disable vendor.qseecomd\n"
         b"    stop android.system.desktop.security.gscd\n"
         b"    stop vendor.secretkeeper.trusty\n"
-        b"    stop android.system.desktop.security.pinweaver_storaged\n",
+        b"    stop android.system.desktop.security.pinweaver_storaged\n"
+        b"    # diagnostica TEMPORANEA: permissivo (i denial restano nel dmesg seriale)\n"
+        b"    setenforce 0\n"
+        b"\n"
+        b"# permissivo ANCHE dopo lo switch enforcing di init (il setenforce 0\n"
+        b"# early-init viene superato da setenforce 1 su load_all_props):\n"
+        b"# tombstoned parte in post-fs-data, a quel punto si ritorna permissivi\n"
+        b"on property:init.svc.tombstoned=running\n"
+        b"    setenforce 0\n"
+        b"\n"
+        b"# dump tombstone su console seriale via builtin init (niente shell: init\n"
+        b"# rifiuta servizi su /system/bin/sh senza transizione di dominio). I trigger\n"
+        b"# coprono stopped e restarting (servizi con autorestart); le copie successive\n"
+        b"# colgono i tombstone completi scritti da debuggerd nei cicli precedenti.\n"
+        b"on property:init.svc.surfaceflinger=stopped\n"
+        b"    write /dev/ttyAMA0 ====SF-STOPPED-TOMBSTONES====\n"
+        b"    copy /data/tombstones/tombstone_00 /dev/ttyAMA0\n"
+        b"    copy /data/tombstones/tombstone_01 /dev/ttyAMA0\n"
+        b"    copy /data/tombstones/tombstone_02 /dev/ttyAMA0\n"
+        b"    copy /data/tombstones/tombstone_03 /dev/ttyAMA0\n"
+        b"    copy /data/tombstones/tombstone_04 /dev/ttyAMA0\n"
+        b"    copy /data/tombstones/tombstone_05 /dev/ttyAMA0\n"
+        b"on property:init.svc.surfaceflinger=restarting\n"
+        b"    write /dev/ttyAMA0 ====SF-RESTARTING-TOMBSTONES====\n"
+        b"    copy /data/tombstones/tombstone_00 /dev/ttyAMA0\n"
+        b"    copy /data/tombstones/tombstone_01 /dev/ttyAMA0\n"
+        b"    copy /data/tombstones/tombstone_02 /dev/ttyAMA0\n"
+        b"    copy /data/tombstones/tombstone_03 /dev/ttyAMA0\n"
+        b"    copy /data/tombstones/tombstone_04 /dev/ttyAMA0\n"
+        b"    copy /data/tombstones/tombstone_05 /dev/ttyAMA0\n",
+        "vendor_configs_file")
+
+    # minkdaemon (Qualcomm SSG): crash-loop su Trusty assente (16+ restart per boot)
+    # si conserva solo il mkdir post-fs-data usato dal resto del vendor
+    add("etc/init/hlosminkdaemon.rc",
+        b"on post-fs-data\n"
+        b"    mkdir /data/vendor/qwes 0755 system system\n",
+        "vendor_configs_file")
+
+    # qseecomd (QSEE comm daemon): richiede QSEE, assente nel VM
+    add("etc/init/qseecomd.rc",
+        b"# qseecomd disabilitato nel VM: richiede QSEE/firmware assente\n",
+        "vendor_configs_file")
+
+    # weaver HAL (Trusty vsock): assente nel VM; il rc originale dichiara il
+    # servizio `disabled` ma viene avviato esplicitamente altrove
+    add("etc/init/android.hardware.weaver-service.android-desktop.rc",
+        b"# weaver HAL disabilitato nel VM: richiede Trusty/vsock assente\n",
+        "vendor_configs_file")
+
+    # minkdaemon (Qualcomm SSG): crash-loop su Trusty assente (16+ restart per boot)
+    # si conserva solo il mkdir post-fs-data usato dal resto del vendor
+    add("etc/init/hlosminkdaemon.rc",
+        b"on post-fs-data\n"
+        b"    mkdir /data/vendor/qwes 0755 system system\n",
+        "vendor_configs_file")
+
+    # qseecomd (QSEE comm daemon): richiede QSEE, assente nel VM
+    add("etc/init/qseecomd.rc",
+        b"# qseecomd disabilitato nel VM: richiede QSEE/firmware assente\n",
+        "vendor_configs_file")
+
+    # weaver HAL (Trusty vsock): assente nel VM; il rc originale dichiara il
+    # servizio `disabled` ma viene avviato esplicitamente altrove
+    add("etc/init/android.hardware.weaver-service.android-desktop.rc",
+        b"# weaver HAL disabilitato nel VM: richiede Trusty/vsock assente\n",
         "vendor_configs_file")
 
     # ---------- grafica alla gbos-vm (mica_graphics_port.py): minigbm + DRM composer ----------
@@ -430,6 +492,26 @@ def main():
     add("lib64/hw/vulkan.swiftshader.so",
         (g / "extract" / "swiftshader" / "libvk_swiftshader.so").read_bytes(),
         "same_process_hal_file", 0o644)
+    # stub libandroid.so: vulkan.swiftshader.so dichiara DT_NEEDED libandroid.so
+    # ma sphal NON puo' caricare le NDK app libs di sistema -> dlopen falliva
+    # ("library libandroid.so not found"). Serve solo AHardwareBuffer_
+    # createFromHandle: lo stub ritorna NULL, le altre AHardwareBuffer_* risolvono
+    # da libnativewindow (sphal-visible). Costo: niente import AHB via handle.
+    add("lib64/libandroid.so",
+        (g / "extract" / "swiftshader" / "libandroid.so").read_bytes(),
+        "same_process_hal_file", 0o644)
+    # sonda EGL: logga i passi della catena display->ANGLE->vulkan su logcat
+    # (-> console seriale). Label compositore: dominio con transizione definita.
+    add("bin/vm-egltest",
+        (g / "extract" / "swiftshader" / "vm-egltest").read_bytes(),
+        "hal_graphics_composer_default_exec", 0o755)
+    add("etc/init/vm-egltest.rc",
+        b"service vendor.vm-egltest /vendor/bin/vm-egltest\n"
+        b"    class core\n"
+        b"    user root\n"
+        b"    group root\n"
+        b"    oneshot\n",
+        "vendor_configs_file")
     add("bin/hw/android.hardware.graphics.allocator-service.minigbm",
         (ex / "gralloc" / "bin" / "hw" / "android.hardware.graphics.allocator-service.minigbm").read_bytes(),
         "hal_graphics_allocator_default_exec", 0o755)
@@ -469,6 +551,7 @@ def main():
              "debug.renderengine.vulkan": "false",
              "debug.renderengine.graphite_desktop_optin": "false",
              "debug.hwui.renderer": "skiagl",
+             "debug.sf.disable_client_composition": "1",
              "ro.vendor.hwcomposer.mode": "client",
              "ro.surface_flinger.has_wide_color_display": "false",
              "ro.surface_flinger.has_HDR_display": "false",

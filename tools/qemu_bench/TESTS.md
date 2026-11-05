@@ -101,3 +101,48 @@ WRITABLE_DISK=1 WAIT_SECONDS=2700 bash run_qemu.sh v3
 Il disco e' pronto: metadata LP validi (checksum corretti), vendor con
 SwiftShader+ANGLE+minigbm scritto su 2 extents, userdata/metadata azzerate.
 
+## Stato 2026-11-05 — ICD SwiftShader carica; sf ancora SIGABRT silenzioso
+
+### Risolto in questa sessione
+1. **`dlopen vulkan.swiftshader.so` falliva nel namespace sphal** in cascata:
+   - `libandroid.so not found` (sphal non carica le NDK app libs): stub
+     `lib64/libandroid.so` (build_libandroid_stub.sh) con
+     `AHardwareBuffer_createFromHandle` -> NULL;
+   - `cannot locate symbol _Z9sync_waitii` (libsync piattaforma non nei NEEDED):
+     `sync_wait(int,int)` reimplementata nello stub (poll POLLIN sul fence fd);
+   - `cannot locate symbol __android_log_write` (liblog non in sphal): no-op
+     nello stub. Tutto in un solo .so, soname libandroid.so, label
+     same_process_hal_file.
+2. **servizi assenti in crash-loop eliminati**: questo init NON supporta
+   `disable` ne' `setenforce` come keyword rc ("Invalid keyword"). Svuotati i
+   rc che definiscono hlosminkdaemon/qseecomd/weaver-service (start espliciti
+   altrove diventano no-op); weaver era il tipc-abort loop.
+3. **sonda EGL nel guest** (vm-egltest.c, dominio compositore): eglInitialize +
+   eglChooseConfig PASSANO (exit 0) -> ANGLE/ICD inizializzano. NB: il dominio
+   compositore NON legge default_prop/graphics_config_prop (avc denials).
+4. **logcat->seriale**: e' il NOSTRO servizio vm-diagnostic-log
+   (logcat -b all ... *:W) - il buffer crash e' incluso, quindi il messaggio
+   d'abort di sf NON passa da logd per niente.
+
+### Aperto: SurfaceFlinger SIGABRT silenzioso a ~150-210s dal via
+- deterministico su ogni istanza, thread secondario (nome ereditato
+  "surfaceflinger"), nessun output logcat di sf;
+- persiste con debug.sf.disable_client_composition=1 -> NON e' RenderEngine;
+- swiftshader release: DABORT == warn (NON aborta) -> l'abort non e' swiftshader;
+- compatibile con: CHECK ANGLE (android_set_abort_message, solo tombstone)
+  oppure sf-watchdog (main thread bloccato su composer/vsync - virtio-gpu non
+  ha vblank);
+- il tombstone e' inaggungibile: crash_dump riceve SIGALRM (30s) prima di
+  finire sotto TCG; setenforce 0 non e' disponibile nel rc.
+
+### Prossimi passi
+1. ipotesi watchdog/composer: provare ro.vendor.hwcomposer.mode=... alternativi
+   e/o escludere il vsync (debug.sf.scheduler...) e/o hwc3-drc senza vulkan;
+2. oppure rebuild SwiftShader debug (DCHECK_ALWAYS_ON + SWIFTSHADER_DISABLE_TRACE
+   disattivo) e ANGLE con logging forzato per far uscire il messaggio su logcat;
+3. oppure velocizzare il dump: crash_dump < 30s (piu' vCPU? -smp 8) per avere
+   il tombstone (i trigger copy tombstone_00..03 su init.svc.surfaceflinger
+   stopped/restarting sono gia' nel rc vm-absent-hardware.rc);
+4. il boot DIVERSAMENTE avanza fino ai servizi (keystore2 attende
+   boot_completed; userdata formattata; composer/allocator registrati).
+
