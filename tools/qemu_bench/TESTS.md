@@ -220,3 +220,29 @@ sphal** e sf abortiva ("couldn't find an OpenGL ES implementation" /
 - dopo la conferma: ripristinare le performance (TCG resta lento; valuta
   -smp 6/8 e l'eventuale venus per Vulkan guest)
 
+## Stato 2026-11-06 — grafica RISOLTA; rimane la corsa contro il Watchdog
+
+### Confermato su run lunghi (2+ ore di guest)
+- SurfaceFlinger con Mesa VirGL: **ZERO crash in tutto il run** (prima moriva
+  a 160-210s costanti). sf orchestra il boot (avvia bootanim), presenta e
+  resta stabile per ore. Problema grafico CHIUSO.
+- bootanim parte (pid dedicato, usa IAllocator) e disegna nella finestra GTK.
+- system_server parte (~2100-2300s guest) ma sotto TCG i suoi boot phase
+  superano i timeout del Watchdog (60s/thread): dopo vari ANR il Watchdog
+  uccide system_server ("Watchdog: *** GOODBYE!") -> zygote lo riavvia ->
+  nuovo ciclo di ~30-40 min. boot_completed non raggiunto per questo.
+
+### Leve per il prossimo tentativo (in ordine di costo)
+1. **fermare audioserver** (SIGSEGV loop: null deref, crash+dump ogni pochi
+   min: spreco di CPU) — svuotare il rc audio nel vendor come per minkdaemon;
+2. **-smp 6** (host 8 core; MTTCG attivo e verificato: qemu al 227%);
+3. valutare l'eliminazione di altri SEGV-loop (verificare a 2h di log);
+4. watchdog: nessun prop standard per allungarlo; restano i fattori di velocita'.
+5. venus (Vulkan guest->host via virtio-gpu) gia' negoziato dal device per il futuro.
+
+### File/variante
+- vendor_port.py --graphics virgl (default) | swiftshader (diagnostico)
+- boot_long.bat: WAIT_SECONDS=99999 (QEMU non viene piu' ucciso dal wrapper)
+- mesa libs: downloads/mesa-virgl/ (build da build_mesa_gles.sh, flag
+  -static-libstdc++ essenziale per il sphal)
+
