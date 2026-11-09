@@ -54,7 +54,7 @@ rm -f "$LOG"
 LD_PRELOAD=/usr/lib/aarch64-linux-gnu/qemu/ui-opengl.so qemu-system-aarch64 \
   -machine "$MACHINE" \
   -cpu cortex-a76 \
-  -m 4G -smp 4 \
+  -m 4G -smp 6 \
   -no-reboot \
   -kernel "$KERNEL" \
   -initrd "$INITRD" \

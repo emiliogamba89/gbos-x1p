@@ -388,6 +388,11 @@ def main():
         b"    # diagnostica TEMPORANEA: permissivo (i denial restano nel dmesg seriale)\n"
         b"    setenforce 0\n"
         b"\n"
+        b"# udsattestation: il suo rc (system) non e' ancora parsato a early-init\n"
+        b"# (stop fallito: 'took 23ms and failed'), serve post-fs-data\n"
+        b"on post-fs-data\n"
+        b"    stop udsattestation\n"
+        b"\n"
         b"# permissivo ANCHE dopo lo switch enforcing di init (il setenforce 0\n"
         b"# early-init viene superato da setenforce 1 su load_all_props):\n"
         b"# tombstoned parte in post-fs-data, a quel punto si ritorna permissivi\n"
@@ -451,6 +456,44 @@ def main():
     add("etc/init/android.hardware.weaver-service.android-desktop.rc",
         b"# weaver HAL disabilitato nel VM: richiede Trusty/vsock assente\n",
         "vendor_configs_file")
+
+    # storage_metrics_service (vendor): spamma interface_start per
+    # com.google.android.snapshot.ISnapshot/default (HAL assente nel VM, resta
+    # solo nel Googlebook reale) ~1x/s -> satura la coda dei control message di
+    # init ("Too many pending control messages") -> i ctl.stop/start legitimi di
+    # system_server vengono DROPPATI -> main thread bloccato -> Watchdog kill
+    # in loop (3 cicli uccisi il 2026-11-07). Si spegne lo spammer.
+    add("etc/init/storage_metrics_service.rc",
+        b"# storage_metrics disabilitato nel VM: inonda init di ctl.interface_start\n"
+        b"# per com.google.android.snapshot.ISnapshot/default (HAL assente) e\n"
+        b"# fa droppare i control message legittimi di system_server (Watchdog kill loop)\n",
+        "vendor_configs_file")
+
+    # suspend_diagnostics (vendor): polla android.frameworks.stats.IStats/default
+    # (HAL assente) -> stesso meccanismo di flooding della coda ctl di init
+    add("etc/init/suspend_diagnostics.rc",
+        b"# suspend_diagnostics disabilitato nel VM: polla IStats/default assente\n",
+        "vendor_configs_file")
+
+    # c2 qti (media codec2 hardware): crash-loopa senza registrare
+    # IComponentStore/default; mediaswcodec resta senza 'default' e usa il suo
+    # swc2 — svuoto servizio + annuncio VINTF cosi' nessuno lo aspetta
+    add("etc/init/vendor.qti.media.c2@1.0-service.rc",
+        b"# c2 qti disabilitato nel VM: crash-loopa senza registrare IComponentStore\n",
+        "vendor_configs_file")
+    add("etc/vintf/manifest/c2_manifest_aidlv2_vendor.xml",
+        b"<manifest version=\"1.0\" type=\"device\"/>\n", "vendor_configs_file")
+
+    # ---------- audio alla gbos-vm (mica_audio_port.py): VINTF blanking ----------
+    # NOTA: l'APEX audio cuttlefish NON è portabile qui (apexd lo rigetta:
+    # 'bootstrap-apexd-failed' + reboot a 28s — la firma/versione non combacia
+    # con la nostra piattaforma). Restano solo gli annunci VINTF svuotati: un
+    # AIDL sound-trigger annunciato ma assente fa aspettare system_server per
+    # sempre ("it trips the watchdog" — commento upstream mica_audio_port.py).
+    add("etc/vintf/manifest/bluetooth_audio.xml",
+        b"<manifest version=\"1.0\" type=\"device\"/>\n", "vendor_configs_file")
+    add("etc/vintf/manifest/soundtrigger.qti.xml",
+        b"<manifest version=\"1.0\" type=\"device\"/>\n", "vendor_configs_file")
 
     # ---------- grafica alla gbos-vm (mica_graphics_port.py): minigbm + DRM composer ----------
     g = HERE.parent.parent / "downloads" / "cuttlefish"
