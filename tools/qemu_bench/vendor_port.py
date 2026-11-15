@@ -29,7 +29,7 @@ HERE = Path(__file__).resolve().parent
 BASE = HERE.parents[1]
 VEND = BASE / "downloads" / "mica-16471258"
 OUT = VEND / "vendor-port"
-WRITABLE = VEND / "disk-writable.raw"
+WRITABLE = Path(os.environ["WRITABLE_PATH"]) if os.environ.get("WRITABLE_PATH") else VEND / "disk-writable.raw"
 
 VENDOR_OFF_EXPECT = 5647630336
 VENDOR_PARTSIZE_EXPECT = 385949696
@@ -302,10 +302,14 @@ def main():
     def original(path):
         return cat_erofs(orig, path)
 
-    # build.prop: il desktop VM non ha StrongBox (protected VM) hardware
+    # build.prop: il desktop VM non ha StrongBox (protected VM) hardware;
+    # ro.hw_timeout_multiplier allunga TUTTI i timeout framework (Watchdog 60s
+    # -> 600s, ANR inclusi): meccanismo AOSP ufficiale per hardware lento/emulazione
     b = original("build.prop")
     add("build.prop", b + b"\n# The VM has no StrongBox hardware.\n"
-        b"ro.vendor.apex.com.android.hardware.keymint.strongbox.desktop=none\n",
+        b"ro.vendor.apex.com.android.hardware.keymint.strongbox.desktop=none\n"
+        b"# TCG e' ~10x piu' lento dell'hardware reale: timeout framework x10\n"
+        b"ro.hw_timeout_multiplier=10\n",
         "vendor_file", 0o600)
 
     # gate sui coprocessori Qualcomm assenti in VM
@@ -323,7 +327,17 @@ def main():
         b"    restart start-subsys")
     add(n, b, "vendor_configs_file")
 
-    # console seriale per la diagnostica
+    # per_mgr (pm-service): senza QRTR nel kernel polla xport_open a ~1000
+    # msg/s allagando logcat/console e rubando cicli TCG; il rc che lo definisce
+    # e' in hw/init.target.rc (per_proxy e' gia' disabled e il suo trigger di
+    # start non scatta mai se per_mgr non gira)
+    n = "etc/init/hw/init.target.rc"
+    b = original(n)
+    old = (b"service vendor.per_mgr /vendor/bin/pm-service\n"
+           b"    class core\n")
+    assert b.count(old) == 1, "blocco per_mgr non trovato in init.target.rc"
+    b = b.replace(old, old + b"    disabled\n")
+    add(n, b, "vendor_configs_file")
     n = "etc/selinux/vendor_file_contexts"
     m = node_meta(orig, "/" + n)
     add(n, original(n) + b"\n/dev/ttyAMA0 u:object_r:console_device:s0\n",
@@ -382,43 +396,20 @@ def main():
     # definisce — ogni riferimento esterno diventa un no-op innocuo.
     add("etc/init/vm-absent-hardware.rc",
         b"on early-init\n"
+        b"    write /dev/ttyAMA0 ===VM-VENDOR-BUILD-MARKER===\n"
         b"    stop android.system.desktop.security.gscd\n"
         b"    stop vendor.secretkeeper.trusty\n"
         b"    stop android.system.desktop.security.pinweaver_storaged\n"
-        b"    # diagnostica TEMPORANEA: permissivo (i denial restano nel dmesg seriale)\n"
-        b"    setenforce 0\n"
         b"\n"
-        b"# udsattestation: il suo rc (system) non e' ancora parsato a early-init\n"
-        b"# (stop fallito: 'took 23ms and failed'), serve post-fs-data\n"
+        b"# NOTA: da rc VENDOR i trigger su init.svc.* sono vietati\n"
+        b"# (\"unexported property trigger found: init.svc.<name>\"): gli\n"
+        b"# stop retriggerati per audioserver/timberslide/ssgmigd/udsattestation\n"
+        b"# (servizi system) vivono in /system/etc/init/zz-vm-fixes.rc.\n"
+        b"# Nemmeno il nome corto funziona per udsattestation: il servizio si\n"
+        b"# chiama android.system.desktop.security.udsattestation.\n"
         b"on post-fs-data\n"
-        b"    stop udsattestation\n"
-        b"\n"
-        b"# permissivo ANCHE dopo lo switch enforcing di init (il setenforce 0\n"
-        b"# early-init viene superato da setenforce 1 su load_all_props):\n"
-        b"# tombstoned parte in post-fs-data, a quel punto si ritorna permissivi\n"
-        b"on property:init.svc.tombstoned=running\n"
-        b"    setenforce 0\n"
-        b"\n"
-        b"# dump tombstone su console seriale via builtin init (niente shell: init\n"
-        b"# rifiuta servizi su /system/bin/sh senza transizione di dominio). I trigger\n"
-        b"# coprono stopped e restarting (servizi con autorestart); le copie successive\n"
-        b"# colgono i tombstone completi scritti da debuggerd nei cicli precedenti.\n"
-        b"on property:init.svc.surfaceflinger=stopped\n"
-        b"    write /dev/ttyAMA0 ====SF-STOPPED-TOMBSTONES====\n"
-        b"    copy /data/tombstones/tombstone_00 /dev/ttyAMA0\n"
-        b"    copy /data/tombstones/tombstone_01 /dev/ttyAMA0\n"
-        b"    copy /data/tombstones/tombstone_02 /dev/ttyAMA0\n"
-        b"    copy /data/tombstones/tombstone_03 /dev/ttyAMA0\n"
-        b"    copy /data/tombstones/tombstone_04 /dev/ttyAMA0\n"
-        b"    copy /data/tombstones/tombstone_05 /dev/ttyAMA0\n"
-        b"on property:init.svc.surfaceflinger=restarting\n"
-        b"    write /dev/ttyAMA0 ====SF-RESTARTING-TOMBSTONES====\n"
-        b"    copy /data/tombstones/tombstone_00 /dev/ttyAMA0\n"
-        b"    copy /data/tombstones/tombstone_01 /dev/ttyAMA0\n"
-        b"    copy /data/tombstones/tombstone_02 /dev/ttyAMA0\n"
-        b"    copy /data/tombstones/tombstone_03 /dev/ttyAMA0\n"
-        b"    copy /data/tombstones/tombstone_04 /dev/ttyAMA0\n"
-        b"    copy /data/tombstones/tombstone_05 /dev/ttyAMA0\n",
+        b"    stop timberslide\n"
+        b"    stop ssgqmigd\n",
         "vendor_configs_file")
 
     # minkdaemon (Qualcomm SSG): crash-loop su Trusty assente (16+ restart per boot)
@@ -483,6 +474,25 @@ def main():
         "vendor_configs_file")
     add("etc/vintf/manifest/c2_manifest_aidlv2_vendor.xml",
         b"<manifest version=\"1.0\" type=\"device\"/>\n", "vendor_configs_file")
+
+    # ---------- crash-loop vendor -> sys.init.updatable_crashing -> RESTART ZYGOTE ----------
+    # Ogni servizio vendor che crasha >4 volte prima di boot_completed imposta
+    # sys.init.updatable_crashing=1; init allora uccide e riavvia ZYGOTE
+    # (con tutto il mondo Java: e' il motivo dei reset di system_server osservati
+    # anche senza Watchdog kill). Svuoto i rc di tutti i servizi DSP/fastRPC e
+    # simili assenti nel VM; per i servizi definiti in system/system_ext
+    # (timberslide, ssgqmigd) uso trigger su init.svc.*=running con stop.
+    for rc, why in [
+        ("vendor.qti.hardware.perf2-hal-service.rc", "perf2 HAL (lib display.config-V12 mancante)"),
+        ("vendor.qti.tftp.rc", "tftp_server (immagini DSP Qualcomm)"),
+        ("vendor.qti.cdsprpc-service.rc", "cdsprpcd (fastRPC CDSP)"),
+        ("vendor.qti.adsprpc-guestos-service.rc", "adsprpcd (fastRPC ADSP)"),
+        ("vendor.qti.audio-adsprpc-service.rc", "audioadsprpcd (DSP audio)"),
+        ("vendor.qti.hardware.dsp-service.rc", "dspservice (DSP Qualcomm)"),
+    ]:
+        add("etc/init/" + rc,
+            ("# disabilitato nel VM: %s; crash-loop -> updatable_crashing -> restart zygote\n" % why).encode(),
+            "vendor_configs_file")
 
     # ---------- audio alla gbos-vm (mica_audio_port.py): VINTF blanking ----------
     # NOTA: l'APEX audio cuttlefish NON è portabile qui (apexd lo rigetta:

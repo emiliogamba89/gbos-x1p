@@ -15,7 +15,7 @@ PAYLOAD="$HERE/../../downloads/mica/payload"
 V4="$HERE/../../downloads/mica-16471258/v4"
 RECOVERY="$HERE/../../downloads/mica-16471258/android-desktop_signed_recovery_image.bin"
 WRITABLE="$HERE/../../downloads/mica-16471258/disk-writable.raw"
-LOG="$HERE/qemu-serial.log"
+LOG="$HOME/qemu-serial-live.log"  # fs nativo WSL: evita i problemi di cache drvfs
 MODE="${1:-q1}"
 WAIT="${WAIT_SECONDS:-300}"
 
@@ -27,15 +27,21 @@ EXTRA=()
 
 case "$MODE" in
   q2) INITRD="$PAYLOAD/initrd_q2.img" ;;
-  v3) INITRD="$PAYLOAD/initrd_v3.img"
+  v3) INITRD="$PAYLOAD/initrd_v4.img"  # fstab splice; AVB/FEC is disabled by valid vbmeta flags=3, not by this alone.
       KERNEL="$V4/kernel.Image"
       MACHINE="virt,gic-version=3,highmem=on,highmem-ecam=off"
       if [ "${WRITABLE_DISK:-0}" = "1" ]; then
-        # copia scrivibile (per /metadata e i servizi di sicurezza); creata alla prima occasione
-        [ -f "$WRITABLE" ] || { echo "[*] creo copia scrivibile del disco (17.9GB)..."; \
-          cp --sparse=always "$RECOVERY" "$WRITABLE"; }
+        # disco scrivibile; se WRITABLE_DISK_PATH punta a un file su fs NATIVO
+        # (es. /home/...), usalo: drvfs (/mnt/c) rende le fsync di /data lentissime
         DISK="$WRITABLE"
-        EXTRA+=(-drive "if=none,media=disk,id=driveimage,format=raw,file=$DISK")
+        if [ -n "${WRITABLE_DISK_PATH:-}" ]; then
+          if [ ! -f "$WRITABLE_DISK_PATH" ]; then
+            echo "[*] copio il disco su fs nativo: $WRITABLE_DISK_PATH"
+            cp --sparse=always "$WRITABLE" "$WRITABLE_DISK_PATH"
+          fi
+          DISK="$WRITABLE_DISK_PATH"
+        fi
+        EXTRA+=(-drive "if=none,media=disk,id=driveimage,format=raw,cache=unsafe,file=$DISK")
       else
         EXTRA+=(-drive "if=none,media=disk,id=driveimage,format=raw,readonly=on,file=$RECOVERY")
       fi
@@ -47,9 +53,15 @@ case "$MODE" in
              -audio none -nic none) ;;
 esac
 
+# Refuse before rotating the live log or trying to lock the writable disk.
+if ps -eo args= | grep -Eq '(^|/)qemu-system-aarch64([[:space:]]|$)'; then
+  echo '[!] QEMU aarch64 già attivo: fermarlo prima di avviare un altro boot.' >&2
+  exit 1
+fi
+
 echo "[*] cmdline ($MODE): $CMDLINE"
 echo "[*] log seriale: $LOG (attendo max ${WAIT}s)"
-rm -f "$LOG"
+mv -f "$LOG" "$LOG.prev" 2>/dev/null || true  # MAI rm: se un QEMU vive, il log andrebbe nel file cancellato
 
 LD_PRELOAD=/usr/lib/aarch64-linux-gnu/qemu/ui-opengl.so qemu-system-aarch64 \
   -machine "$MACHINE" \
@@ -73,3 +85,6 @@ wait "$QPID" 2>/dev/null || true
 
 echo "=== ULTIME 50 RIGHE DEL LOG ==="
 tail -50 "$LOG"
+
+# persistenza della seriale su /mnt/c a fine run
+cp -f "$LOG" "$HERE/qemu-serial.log" 2>/dev/null || true

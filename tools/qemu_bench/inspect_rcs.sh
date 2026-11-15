@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
-for f in etc/init/hlosminkdaemon.rc etc/init/qseecomd.rc etc/init/android.hardware.weaver-service.android-desktop.rc; do
-  echo "=== $f"; head -16 /tmp/rcdump/$f 2>/dev/null
+set -u
+RE=/home/zero89/clang-arm64/clang-r584948b/bin/llvm-readelf
+for f in libEGL_virgl.so libgallium_dri.so libGLESv2_virgl.so libGLESv1_CM_virgl.so libdrm.so; do
+  echo "== $f"
+  "$RE" -d "/home/zero89/gbos-build/guest/mesa-runtime/$f" | grep NEEDED
 done

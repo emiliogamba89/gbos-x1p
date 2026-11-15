@@ -12,3 +12,7 @@ downloads/
 # artefatto sessione
 .session
 tools/qemu_bench/qemu-serial.log
+
+# immagini EROFS rebuildate (GB) - non committare
+tools/qemu_bench/system-port/*.erofs
+tools/qemu_bench/system-port/*.tar

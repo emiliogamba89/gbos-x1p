@@ -14,7 +14,8 @@ cat > "$WORK/android-aarch64.cross" << EOF
 [binaries]
 c = ['$CLANG/clang', '--target=aarch64-none-linux-android35', '--sysroot=$SYSROOT']
 cpp = ['$CLANG/clang++', '--target=aarch64-none-linux-android35', '--sysroot=$SYSROOT',
-       '-fno-exceptions', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables']
+       '-fno-exceptions', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables',
+       '-static-libstdc++']
 ar = '$CLANG/llvm-ar'
 strip = '$CLANG/llvm-strip'
 c_ld = 'lld'

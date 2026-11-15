@@ -1,0 +1,13 @@
+[*] cmdline (v3): console=ttyAMA0,115200 earlycon=pl011,0x9000000 panic=0 root=/dev/ram0 androidboot.hardware=android-desktop androidboot.hardware.platform=android-desktop androidboot.slot_suffix=_a androidboot.boot_devices=3f000000.pcie androidboot.baseband=apq androidboot.load_modules_parallel=true androidboot.vbmeta.device_state=unlocked androidboot.verifiedbootstate=orange androidboot.veritymode=logging printk.devkmsg=on loglevel=7 ignore_loglevel androidboot.vendor.apex.com.android.hardware.keymint.strongbox.desktop=none androidboot.vendor.apex.com.android.hardware.audio.desktop=none
+[*] log seriale: /home/zero89/qemu-serial-live.log (attendo max 99999s)
+libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+MESA: error: ZINK: failed to choose pdev
+libEGL warning: egl: failed to create dri2 screen
+vrend_check_no_error: context error reported 9 "RenderThread" Unknown 1286
+context 9 failed to dispatch DRAW_VBO: 22
+vrend_decode_ctx_submit_cmd: context error reported 9 "RenderThread" Illegal command buffer 786440

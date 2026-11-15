@@ -1,0 +1,7 @@
+{
+  "system_offset": 177209344,
+  "system_size": 1081446400,
+  "new_size": 1103187968,
+  "services_jar_sha256": "9a64b99d0482a166edca018904801883f6f9425e7d7db82802af48e8c930befd",
+  "patch": "Watchdog.mAllowRestart true->false (services.jar classes.dex, 1 byte)"
+}

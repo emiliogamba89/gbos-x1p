@@ -246,3 +246,123 @@ sphal** e sf abortiva ("couldn't find an OpenGL ES implementation" /
 - mesa libs: downloads/mesa-virgl/ (build da build_mesa_gles.sh, flag
   -static-libstdc++ essenziale per il sphal)
 
+## Stato 2026-11-09 — ripristino LP pulito e nuovo run VirGL
+
+- Il disco scrivibile preesistente era in uno stato LP incerto dopo i tentativi
+  di estendere `system_a`. Prima di intervenire ne è stata salvata una copia
+  byte-per-byte in `/home/zero89/disk-writable-before-recovery.raw`.
+- `disk-writable.raw` è stato ripristinato dall'immagine recovery ufficiale
+  (SHA256 verificato identico: `b0fd614ffe1a088fa3451a4b81c55a73f83e246286184a46ca306250db9af1f1`)
+  e `vendor_port.py --graphics virgl` è stato rieseguito da zero. Verifica
+  `fsck.erofs + byte-per-byte` superata; l'estensione LP vendor è stata
+  aggiunta dalla procedura già collaudata.
+- Nuovo run: zygote ~254s, SurfaceFlinger ~327s, bootanim avviata; VirGL resta
+  attivo. `system_server` parte, ma il primo avvio TCG resta molto lento e il
+  Watchdog lo termina dopo ~37 minuti; zygote riparte. **`sys.boot_completed`
+  non è stato osservato**, quindi UI/boot completo non confermati.
+- Il tentativo di ricostruire `system` con `system_port.py` si è fermato prima
+  della scrittura: immagine EROFS incrementale 1,103,167,488 byte contro
+  1,081,446,400 disponibili. Gli stub dei font non riducono gli extent già
+  allocati dall'incrementale.
+- Il QEMU di questo run è stato fermato; seriale salvata in
+  `qemu-serial.log` (20 MiB). La copia pre-ripristino è una salvaguardia, non
+  un layout LP da riutilizzare: l'estensione system non è stata convalidata.
+- Prossimo lavoro: evitare di ritentare `lp_rewrite_slots.py` (parser errato);
+  usare un metodo EROFS compatto oppure implementare/verificare l'estensione
+  `system_a` partendo dai metadati LP puliti. Solo allora riprovare la patch
+  Watchdog. Grafica e partenza di zygote/SF sono già provate separatamente.
+
+## Stato 2026-11-15 — AVB/FEC sbloccato; rebuild EROFS e DEX corretti
+
+**Confermato nel guest, non solo dedotto dalle immagini:**
+
+- Ripristinate esclusivamente `vbmeta_a/b` (4 MiB ciascuna) dalla recovery
+  ufficiale su `/home/zero89/disk-run.raw`, poi impostato `flags=3` a offset
+  **120, big endian**. Magic header `AVB0`; `AVBf` è il footer. Il vecchio
+  `dump_vbmeta.py` aveva un layout completamente errato, ora corretto.
+- Backup delle partizioni prima/ufficiale/test in
+  `/home/zero89/avb-backups/20261115-121243-366058/`.
+- Log: `Returning avb_handle with status: VerificationDisabled`, poi
+  `AVB HASHTREE disabled on: /system` e sulle altre partizioni AVB.
+  Nessun errore/correzione FEC. `veritymode=logging` da solo NON disabilita FEC;
+  è il flag nella vbmeta integra a farlo. Non azzerare la vbmeta.
+- Il primo mount raw ha rivelato il CRC EROFS errato di `system_port.py`:
+  EROFS usa CRC32C seed `~0`, **senza XOR finale**. Corretto.
+- Successivo blocco SELinux: root directory unlabeled. Il rebuild leggeva
+  `root_nid` da +16 (in realtà `inos`); il root reale è NID **57**, ora risolto
+  con `dump.erofs --path=/`. Ripristinati xattr condivisi, mode e uid/gid root;
+  aggiunti label espliciti ai parent `system`, `system/etc`, `system/etc/init`.
+- Nuova system: **1,103,175,680 byte**, scritta negli stessi tre extent LP,
+  `fsck.erofs` e confronto services.jar/framework-res superati.
+- Nel guest: parsing di `zz-vm-fixes.rc` a 14.60s, marker
+  `===VM-SYSTEM-BUILD4-MARKER===` a 108s; **`stop audioserver` succeeded** a
+  344s, stop udsattestation succeeded a 407s. Nessun restart zygote fino a quel punto.
+  La precedente ipotesi che init non enumerasse i nuovi rc era falsa: FEC
+  restituiva i blocchi originali.
+- ART ha poi rivelato `Bad checksum` su services.jar: il patcher v3 calcolava
+  SHA-1 su `[12:]` anziché `[32:]` e Adler32 prima di aggiornare la firma.
+  Corretto: SHA-1 `[32:]`, poi Adler32 `[12:]`; ZIP stored allineato a 4 byte.
+  Riparato `/home/zero89/services-v3.jar` preservando le patch istruzioni;
+  tutti e quattro i DEX verificati, system ricostruita e nuovo run avviato.
+- Nel run con DEX corretti, `SystemServer: Entered the Android system server!`
+  alle 11:37:19 guest, PID **1070**, poi `Reading configuration...`.
+  Nessun `Bad checksum` / `VerifyError` osservato; marker e stop audio nuovamente
+  confermati. Run lasciato attivo per il boot lungo TCG.
+- `validate_avb_fix.sh`: **7 test unitari passati**, parser concorde con avbtool
+  sulla vbmeta ufficiale (digest header+aux MATCH), compilazione Python e sintassi
+  shell OK. Guard contro QEMU concorrente provato: rifiuto prima di ruotare il log.
+- **BOOT COMPLETATO (2026-11-15, run 20:13→20:28): `sys.boot_completed=1`,
+  launcher3 attivo (PID 2073), azioni post-boot eseguite.** Prima volta
+  assoluta su QEMU/TCG con la system ufficiale patchata.
+
+### Root cause finale del boot bloccato (post AVB/DEX)
+
+- Gli stub CJK (`NotoSansCJK-Regular.ttc`, `NotoSerifCJK-Regular.ttc`) erano
+  TTF a faccia singola (AndroidClock), ma le famiglie in `fonts.xml` li citano
+  con `index="0..3"`: `Font.Builder.nBuild` lancia `IllegalArgumentException`
+  → il task `FontManagerService_create` muore SENZA `complete()` →
+  `onBootPhase` resta in `mServiceStarted.join()` (FontManagerService.java:194)
+  → main thread fermo per sempre (il Watchdog, con le kill NOPpate, urlava
+  `*** GOODBYE!` ogni ~70s senza potere agire: 336 volte in 7 ore).
+- **`fonts.xml` nuovo NON basta**: `UpdatableFontDir` copia la config in
+  `/data/fonts/config/config.xml` al primo load e la riusa ai boot successivi:
+  lo stale config (con le famiglie CJK) continuava a far fallire il task.
+- Fix DOPPIO in `system_port.py`: (1) `fonts.xml` ricostruito senza le 4
+  famiglie CJK (`zh-Hans`, `zh-Hant,zh-Bopo`, `ja`, `ko`) → 179 famiglie,
+  0 riferimenti CJK, XML valido; (2) gli stub CJK sono ora **TTC validi**
+  (`ttcf`, versione 0x00010000, 4 offset tutti verso lo stesso sfnt valido →
+  qualunque `index` risolve) così anche lo stale `/data` config parser.
+- Verificato con dump dal disco: `fonts.xml` nuovo = 179 famiglie / 0 CJK;
+  TTC estratti == `cjk_bytes` (assert end-to-end nel rebuild).
+- Nel run finale: NESSUN `Failure in FontManagerService_create`; il main
+  thread attraversa per la prima volta tutti i boot phase (AMS, AppSearch,
+  Thermal, Content…) → `sys.boot_completed=1` → launcher3 up.
+- Residuo (non bloccante): SIGABRT di init (PID 437) a ~46s dal lancio,
+  prima del framework; emoji senza glifi (stub AndroidClock); CJK = tofu.
+
+### Lezioni
+
+- Gli stub sostitutivi devono avere le STESSE proprietà strutturali degli
+  originali citati dalla config (ttc collection ⇒ subface multiple).
+- Tutto ciò che scrive in `/data` sopravvive ai rebuild di system/vendor:
+  valutare sempre lo stato persistente (font config, ART cache, settings).
+- Il TTC wrap (28 byte di header + sfnt riusato) è la tecnica universale
+  per stub di collection font.
+- Gli edit dei file grandi vanno fatti con ancore estratte a runtime + od
+  post-verify: le omissioni di battitura sui token lunghi sono inevitabili.
+
+### Comandi riproducibili (QEMU spento prima di scrivere)
+
+```bash
+python3 tools/qemu_bench/restore_vbmeta_test.py /home/zero89/disk-run.raw \
+  downloads/mica-16471258/android-desktop_signed_recovery_image.bin --flags 3 --apply
+bash tools/qemu_bench/rebuild_system_avb_fix.sh
+python3 tools/qemu_bench/test_avb_helpers.py
+```
+
+`restore_vbmeta_test.py` controlla GPT, salva backup e verifica read-back;
+omettere `--apply` per dry run; `--flags 0 --apply` ripristina le vbmeta ufficiali.
+Non riscrive `super` né `/data`. `stop_qemu.sh` ora cerca argv, non `comm`
+(troncato a 15 caratteri su Linux); `run_qemu.sh` rifiuta QEMU concorrenti
+prima di ruotare il log. Seriale live: `/home/zero89/qemu-serial-live.log`.
+

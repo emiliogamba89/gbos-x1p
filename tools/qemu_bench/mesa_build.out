@@ -1,0 +1,19 @@
+=== cross file
+=== meson setup
+    video-codecs        : 
+    vulkan-drivers      : 
+    zstd                : disabled
+
+Found ninja-1.12.1 at /home/zero89/gbos-build/bin/ninja
+[OK] configurato — pronto per ninja
+=== ninja build (this takes a while)
+[1046/1048] Linking target src/mesa/glapi/es1api/libGLESv1_CM_virgl.so
+[1047/1048] Linking target src/mesa/glapi/es2api/libGLESv2_virgl.so
+[1048/1048] Linking target src/egl/libEGL_virgl.so
+=== strip + publish
+-rwxr-xr-x 1 zero89 zero89 270328 Nov  5 21:33 /home/zero89/gbos-build/guest/mesa-runtime/libEGL_virgl.so
+-rwxr-xr-x 1 zero89 zero89 26144 Nov  5 21:33 /home/zero89/gbos-build/guest/mesa-runtime/libGLESv1_CM_virgl.so
+-rwxr-xr-x 1 zero89 zero89 60992 Nov  5 21:33 /home/zero89/gbos-build/guest/mesa-runtime/libGLESv2_virgl.so
+-rwxr-xr-x 1 zero89 zero89 17684840 Nov  5 21:33 /home/zero89/gbos-build/guest/mesa-runtime/libgallium_dri.so
+-rwxr-xr-x 1 zero89 zero89 92896 Nov  5 21:33 /home/zero89/gbos-build/guest/mesa-runtime/libdrm.so
+[OK] Mesa VirGL GLES costruita in /home/zero89/gbos-build/guest/mesa-runtime
