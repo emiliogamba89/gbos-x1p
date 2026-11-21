@@ -66,7 +66,7 @@ set default=0
 set timeout=1
 search --no-floppy --set=root --label GRUB
 menuentry 'GBOS bring-up probe (mica/ThinkBook)' {
-    linux /gbos/kernel.bin rdinit=/probe printk.devkmsg=on ignore_loglevel panic=10 panic_print=1
+    linux /gbos/kernel.bin rdinit=/probe printk.devkmsg=on ignore_loglevel panic=10 panic_print=1 maxcpus=1
     devicetree /gbos/dtb-lenovo.dtb
     initrd /gbos/initrd-probe.cpio.gz
 }
