@@ -366,3 +366,55 @@ Non riscrive `super` né `/data`. `stop_qemu.sh` ora cerca argv, non `comm`
 (troncato a 15 caratteri su Linux); `run_qemu.sh` rifiuta QEMU concorrenti
 prima di ruotare il log. Seriale live: `/home/zero89/qemu-serial-live.log`.
 
+---
+
+## USB bring-up nativo su ThinkBook (Fase 2, 2026-11-21)
+
+Obiettivo: primo boot reale del kernel mica sul ThinkBook 16 G7 QOY via USB,
+senza console seriale. Catena: UEFI → GRUB arm64 → kernel GKI mica + DTB
+mainline Lenovo + initrd probe → log su partizione FAT "BOOTLOG" → poweroff.
+
+Scoperte chiave:
+- `boot_a` della recovery è vuoto (kernel_size=0, ramdisk=0) e NESSUNA
+  partizione della recovery contiene un DTB base: sul Dell la base DT la fornisce
+  il bootloader di fabbrica (assente dall'immagine). `dtb_a` è tutto zeri;
+  `dtbo_a` è una tabella overlay valida (`d7b7ab1e`) ma inutile senza base.
+- Il kernel mica (6.12.81-android16) ha `CONFIG_EFI_STUB=y`, `CONFIG_OF=y`,
+  FAT/USB/xHCI/UAS built-in, `CONFIG_ACPI` assente → boot obbligatoriamente DT.
+- Il ThinkBook ha il device tree nel mainline:
+  `arch/arm64/boot/dts/qcom/x1p42100-lenovo-thinkbook-16.dts` (kernel 6.17+;
+  tastiera/touchpad/display PWM/NVMe/WCN7850/audio/USB). Le distro ARM girano
+  già su questa macchina con GRUB+DT: catena provata, replicata col kernel mica.
+- Il vendor initramfs mica include `camcc-x1p42100.ko` → la famiglia supporta
+  esplicitamente il SoC X1P42100.
+
+Artefatti (tutti in `tools/qemu_bench/`):
+- `build_dtb_lenovo.sh` — compila il DTB da sorgente kernel 6.18 (kernel.org,
+  estrazione selettiva; cpp -nostdinc + dtc senza kbuild; i symlink dt-bindings
+  richiedono anche `include/uapi`). Output `/home/zero89/gbos-usb/dtb-lenovo.dtb`
+  (152 KiB, root compatible `"lenovo,thinkbook-16","qcom,x1p42100"`).
+- `usb-test/probe.c` — init statico: monta proc/sys/devtmpfs, aspetta
+  l'enumerazione USB, crea il node `/dev/sda2`, dump DT model/compatible +
+  cpuinfo + partizioni + meminfo + dmesg completo in
+  `/BOOTLOG/gbos-probe.log`, poi poweroff.
+- `build_usb_test.sh` — assembla `usbdisk.img` (1,34 GiB): MBR bootable;
+  p1 FAT32 "GRUB" 256 MiB (BOOTAA64.EFI standalone + kernel.bin +
+  dtb-lenovo.dtb + initrd probe; grub.cfg: `linux /gbos/kernel.bin
+  rdinit=/probe printk.devkmsg=on ignore_loglevel` + `devicetree
+  /gbos/dtb-lenovo.dtb`); p2 FAT32 "BOOTLOG" 1 GiB. Toolchain senza root:
+  `apt download` + `dpkg-deb -x` (grub-common, grub-efi-arm64-bin, mtools,
+  device-tree-compiler); nota: i .deb scaricati hanno nome con versione →
+  usare glob `${p}_*.deb`.
+- `build_grub_efi.sh` — BOOTAA64.EFI via `grub-mkimage` con memdisk
+  (`grub-mkstandalone` richiede libefivar non scaricabile via apt senza root;
+  su Ubuntu arm64 il comando `devicetree` è nel modulo **fdt.mod**).
+- `write_usb.ps1` — scrittura raw su `\\.\PhysicalDrive2` con verifica
+  FriendlyName Kingston e transcript `write_usb-log.txt`; richiede UAC.
+
+Stato: `usbdisk.img` scritto sulla chiavetta Kingston DataTraveler 3.0
+(31 GB); in attesa del primo boot reale (Secure Boot off, F12 → UEFI:
+Kingston). Canale di verifica: `gbos-probe.log` dentro BOOTLOG.
+Il log assente = kernel morto prima dell'initrd (probabile mismatch DT) →
+iterare sul DTB. Il log presente = kernel vivo: leggere model/compatible/
+cpuinfo/partizioni per la Fase 3 (disco GPT Android completo su USB).
+

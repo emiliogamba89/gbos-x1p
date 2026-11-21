@@ -61,3 +61,22 @@ DSDT del recovery per il confronto driver.
 6. Piattaforma ACPI-first **confermata** → aumenta la probabilità che il kernel mica
    (stessa famiglia SoC, prodotto per il mercato PC) booti via **ACPI con EFI stub**:
    da verificare in Fase 1 con `unpack_bootimg`.
+
+## Aggiornamento 2026-11-21: DTB mainline compilato
+
+- Confermato che il ThinkBook 16 G7 QOY ha il device tree nel kernel mainline:
+  `arch/arm64/boot/dts/qcom/x1p42100-lenovo-thinkbook-16.dts` (dal 6.17,
+  serie di Jens Glathe). Feature dichiarate: USB-C/A, tastiera, touchpad,
+  touchscreen, display + PWM backlight, PCIe/NVMe, lettore SD, ath12k WCN7850
+  WiFi/BT, ADSP/CDSP, audio speaker/DMIC/jack, DP/HDMI.
+- DTB compilato senza kbuild: `tools/qemu_bench/build_dtb_lenovo.sh` estrae
+  il kernel 6.18 da kernel.org, poi `cpp -nostdinc` + `dtc`. Output 152 KiB,
+  root compatible `"lenovo,thinkbook-16","qcom,x1p42100"`.
+- Attenzione: i dts di master post-2026-03 hanno i controller USB
+  "flattened" (nuove bindings) NON compatibili col driver 6.12 del GKI mica
+  → usare 6.17/6.18 stable, non master.
+- Implicazione Fase 1: la catena GRUB+DT su questa macchina è già provata
+  dalle distro ARM → il probe USB usa esattamente quella catena col kernel
+  mica. La nota "boot ACPI" qui sopra resta storica: `CONFIG_ACPI` è assente
+  nel kernel mica, il boot sarà DT; la base DT non è nella recovery (il Dell
+  la porta nel bootloader di fabbrica) → usiamo il DTB mainline Lenovo.

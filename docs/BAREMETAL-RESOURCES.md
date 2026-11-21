@@ -61,3 +61,12 @@ il percorso Fedora incontra problemi.
 - Fase 5 (bare-metal): GRUB/EFI con dtbloader + DTB da `x1p42100-lenovo-thinkbook-16.dts`
   compilato per il kernel scelto + cmdline `clk_ignore_unused systemd.tpm2_wait=0`.
   Verificare `CONFIG_ACPI` del kernel mica resta irrilevante se si va su DT puro.
+
+## Aggiornamento 2026-11-21
+
+Il DTB `x1p42100-lenovo-thinkbook-16` è compilato e in uso nel probe USB
+(`tools/qemu_bench/build_dtb_lenovo.sh`, sorgente kernel 6.18): la Fase 5
+"GRUB/EFI + DTB" ha la prima realizzazione in `tools/qemu_bench/build_usb_test.sh`
+(GRUB arm64 standalone + kernel mica + DTB + initrd probe → `usbdisk.img`).
+Cmdline del probe: `rdinit=/probe printk.devkmsg=on ignore_loglevel`.
+`CONFIG_ACPI` del kernel mica è assente → percorso DT puro confermato.

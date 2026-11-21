@@ -1,0 +1,94 @@
+/* probe: init statico minimo per il test di bring-up GBOS su ThinkBook.
+ * Scrive su /dev/sda2 (FAT, label BOOTLOG): modello DT, CPU, partizioni, dmesg.
+ * Poi reboot per rileggere il log da Windows. */
+#define _GNU_SOURCE
+#include <fcntl.h>
+#include <linux/reboot.h>
+#include <sys/klog.h>
+#include <sys/mount.h>
+#include <sys/reboot.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int logfd = -1;
+
+static void wlog(const char *s) {
+    if (logfd >= 0) { write(logfd, s, strlen(s)); fsync(logfd); }
+}
+
+static void dumpfile(const char *path, const char *title) {
+    char buf[16384];
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) { wlog(title); wlog(" (non disponibile)\n"); return; }
+    wlog("\n===== "); wlog(title); wlog(" =====\n");
+    ssize_t n;
+    while ((n = read(fd, buf, sizeof(buf))) > 0) write(logfd, buf, n);
+    close(fd);
+}
+
+int main(void) {
+    mkdir("/proc", 0755); mkdir("/sys", 0755); mkdir("/dev", 0755); mkdir("/tmp", 0755);
+    mount("proc", "/proc", "proc", 0, NULL);
+    mount("sysfs", "/sys", "sysfs", 0, NULL);
+    mount("devtmpfs", "/dev", "devtmpfs", 0, NULL);
+
+    /* attende l'enumerazione USB (fino a 15 s) e crea il nodo a mano */
+    for (int i = 0; i < 30; i++) {
+        struct stat st;
+        if (stat("/dev/sda2", &st) == 0) break;
+        mknod("/dev/sda2", S_IFBLK | 0600, makedev(8, 2));
+        usleep(500000);
+    }
+
+    logfd = open("/tmp/log.tmp", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+
+    wlog("=== GBOS bring-up probe (mica kernel su ThinkBook) ===\n");
+    dumpfile("/sys/firmware/devicetree/base/model", "DT model");
+    dumpfile("/sys/firmware/devicetree/base/compatible", "DT compatible");
+    dumpfile("/proc/cpuinfo", "cpuinfo");
+    dumpfile("/proc/partitions", "partitions");
+    dumpfile("/proc/meminfo", "meminfo (prime righe nel buffer)");
+
+    char *dmesg = malloc(4 << 20);
+    if (dmesg) {
+        long n = klogctl(3, dmesg, 4 << 20); /* READ_ALL */
+        if (n > 0) {
+            wlog("\n===== dmesg =====\n");
+            write(logfd, dmesg, n);
+        }
+        free(dmesg);
+    }
+    fsync(logfd); close(logfd);
+
+    /* copia su FAT: monta /dev/sda2 e trasferisce il file */
+    mkdir("/log", 0755);
+    if (mount("/dev/sda2", "/log", "vfat", 0, NULL) == 0) {
+        char buf[65536];
+        int in = open("/tmp/log.tmp", O_RDONLY);
+        int out = open("/log/gbos-probe.log", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+        if (in >= 0 && out >= 0) {
+            ssize_t n;
+            while ((n = read(in, buf, sizeof(buf))) > 0) write(out, buf, n);
+            fsync(out);
+        }
+    } else {
+        /* fallback: prova direttamente su ext4 nel caso il log sia ext4 */
+        mount("/dev/sda2", "/log", "ext4", 0, NULL);
+        char buf[65536];
+        int in = open("/tmp/log.tmp", O_RDONLY);
+        int out = open("/log/gbos-probe.log", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+        if (in >= 0 && out >= 0) {
+            ssize_t n;
+            while ((n = read(in, buf, sizeof(buf))) > 0) write(out, buf, n);
+            fsync(out);
+        }
+    }
+    sync();
+    reboot(LINUX_REBOOT_CMD_POWER_OFF);
+    for (;;) pause();
+}

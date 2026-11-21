@@ -6,9 +6,26 @@
 > originali e aggiungere un layer di compatibilità locale), adattandolo alla piattaforma
 > Qualcomm X1 / Windows-on-ARM.
 
-**Stato documento**: v1.0 — piano iniziale, nessuna fase ancora avviata.
+**Stato documento**: v1.1 — vedi "Stato attuale" qui sotto.
 **Riservatezza immagini**: il recovery Google non va mai ridistribuito; tutto viene
 scaricato e costruito localmente (come richiedono anche gbrunch e gbos-vm).
+
+## Stato attuale (2026-11-21)
+
+- **Fase QEMU completata**: il recovery mica ufficiale (system/vendor
+  ricostruiti, vbmeta flags=3) raggiunge `sys.boot_completed=1` con launcher3
+  su QEMU aarch64 (TCG). Dettagli e lezioni: `tools/qemu_bench/TESTS.md`.
+- **Fase USB probe avviata**: `usbdisk.img` (GRUB arm64 + kernel mica + DTB
+  mainline ThinkBook `x1p42100-lenovo-thinkbook-16` + initrd probe) costruito
+  e scritto su chiavetta USB; in attesa del primo boot reale sul ThinkBook
+  (log su partizione FAT "BOOTLOG", nessuna console seriale necessaria).
+- Analisi aggiornamento upstream novembre 2026 (CL3B.260622.286.R2, kernel
+  6.12 aggiornato su ARM64): `docs/GBOS-UPDATES.md`.
+- Nota storica: le ipotesi ACPI nella tabella qui sotto sono state smentite
+  dal kernel config del recovery (`CONFIG_ACPI` assente) → boot DT
+  obbligatorio; la DTB base non è nella recovery (il Dell la porta nel
+  bootloader di fabbrica), quindi per il ThinkBook usiamo il DTB mainline
+  Lenovo compilato da kernel 6.18.
 
 ---
 

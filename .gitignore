@@ -16,3 +16,7 @@ tools/qemu_bench/qemu-serial.log
 # immagini EROFS rebuildate (GB) - non committare
 tools/qemu_bench/system-port/*.erofs
 tools/qemu_bench/system-port/*.tar
+
+# immagine USB probe (GB) e log scrittura - non committare
+tools/qemu_bench/usbdisk.img
+tools/qemu_bench/write_usb-log.txt
