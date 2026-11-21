@@ -4,6 +4,9 @@ W=/home/zero89/gbos-usb
 K=/home/zero89/downloads/mica-16471258/v4/kernel.Image
 [ -f "$K" ] || K=/home/zero89/gbos-usb/esp/gbos/kernel.bin
 cd "$W"
+# usa una COPIA del disco: il test non deve inquinare usbdisk.img
+# (che viene scritto su Windows per la chiavetta reale)
+cp -f "$W/usbdisk.img" "$W/test-disk.img"
 timeout 150 qemu-system-aarch64 \
   -M virt -cpu cortex-a76 -m 2G \
   -kernel "$K" \
@@ -11,7 +14,7 @@ timeout 150 qemu-system-aarch64 \
   -append "rdinit=/probe console=ttyAMA0 ignore_loglevel" \
   -device qemu-xhci,id=xhci \
   -device usb-storage,bus=xhci.0,drive=usb0 \
-  -drive if=none,file="$W/usbdisk.img",format=raw,id=usb0,cache=unsafe \
+  -drive if=none,file="$W/test-disk.img",format=raw,id=usb0,cache=unsafe \
   -nographic 2>&1 | tail -60
 echo "=== QEMU uscito ==="
 # se il log è stato scritto nell'immagine, estrailo e mostralo

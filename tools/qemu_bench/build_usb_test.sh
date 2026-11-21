@@ -16,6 +16,20 @@ else
   exit 1
 fi
 
+echo "== [1b] nodo ramoops nel DTB (pstore console per diagnostica panic) =="
+FDT="$W/prefix/usr/bin/fdtput"
+if [ ! -x "$FDT" ]; then
+  cd "$W"
+  ls device-tree-compiler_*.deb >/dev/null 2>&1 || apt download device-tree-compiler >/dev/null 2>&1 || true
+  dpkg-deb -x device-tree-compiler_*_arm64.deb "$W/prefix"
+fi
+DTB="$W/esp/gbos/dtb-lenovo.dtb"
+"$FDT" -c "$DTB" /reserved-memory/ramoops@c0000000
+"$FDT" -t x "$DTB" /reserved-memory/ramoops@c0000000 reg - 0x0 0xc0000000 0x0 0x100000
+"$FDT" -t s "$DTB" /reserved-memory/ramoops@c0000000 compatible ramoops
+"$FDT" -t u "$DTB" /reserved-memory/ramoops@c0000000 record-size 4096 console-size 131072 ftrace-size 0 pmsg-size 4096 ecc-size 4096
+"$W/prefix/usr/bin/dtc" -I dtb -O dts "$DTB" 2>/dev/null | grep -A7 'ramoops@'
+
 echo "== [2] scarico/estraggo i tool (senza root) =="
 cd "$W"
 for p in grub-common grub-efi-arm64-bin mtools device-tree-compiler cpio; do
@@ -52,7 +66,7 @@ set default=0
 set timeout=1
 search --no-floppy --set=root --label GRUB
 menuentry 'GBOS bring-up probe (mica/ThinkBook)' {
-    linux /gbos/kernel.bin rdinit=/probe printk.devkmsg=on ignore_loglevel
+    linux /gbos/kernel.bin rdinit=/probe printk.devkmsg=on ignore_loglevel panic=10 panic_print=1
     devicetree /gbos/dtb-lenovo.dtb
     initrd /gbos/initrd-probe.cpio.gz
 }

@@ -2,6 +2,7 @@
  * Scrive su /dev/sda2 (FAT, label BOOTLOG): modello DT, CPU, partizioni, dmesg.
  * Poi reboot per rileggere il log da Windows. */
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <fcntl.h>
 #include <linux/reboot.h>
 #include <sys/klog.h>
@@ -29,6 +30,24 @@ static void dumpfile(const char *path, const char *title) {
     ssize_t n;
     while ((n = read(fd, buf, sizeof(buf))) > 0) write(logfd, buf, n);
     close(fd);
+}
+
+static void dump_pstore(void) {
+    mkdir("/sys/fs/pstore", 0755);
+    if (mount("pstore", "/sys/fs/pstore", "pstore", 0, NULL) != 0) {
+        wlog("\n(pstore non disponibile)\n");
+        return;
+    }
+    DIR *d = opendir("/sys/fs/pstore");
+    if (!d) { wlog("\n(pstore opendir fallito)\n"); return; }
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        char path[300];
+        snprintf(path, sizeof(path), "/sys/fs/pstore/%s", e->d_name);
+        dumpfile(path, e->d_name);
+    }
+    closedir(d);
 }
 
 int main(void) {
@@ -68,6 +87,7 @@ int main(void) {
     dumpfile("/proc/cpuinfo", "cpuinfo");
     dumpfile("/proc/partitions", "partitions");
     dumpfile("/proc/meminfo", "meminfo (prime righe nel buffer)");
+    dump_pstore();
 
     char *dmesg = malloc(4 << 20);
     if (dmesg) {
