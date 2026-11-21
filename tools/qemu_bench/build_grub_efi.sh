@@ -13,5 +13,5 @@ tar -cf "$W/memdisk.tar" -C "$W/memdisk" boot
   -m "$W/memdisk.tar" \
   -o "$W/esp/EFI/BOOT/BOOTAA64.EFI" \
   -p '(memdisk)/boot/grub' \
-  linux fdt gzio normal part_msdos fat configfile echo ls boot
+  linux fdt gzio normal part_msdos fat configfile echo ls boot memdisk tar search search_label
 ls -la "$W/esp/EFI/BOOT/BOOTAA64.EFI"

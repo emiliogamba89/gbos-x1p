@@ -418,3 +418,20 @@ Il log assente = kernel morto prima dell'initrd (probabile mismatch DT) →
 iterare sul DTB. Il log presente = kernel vivo: leggere model/compatible/
 cpuinfo/partizioni per la Fase 3 (disco GPT Android completo su USB).
 
+### Fix boot console GRUB (2026-11-21, secondo round)
+
+Sintomo: sul ThinkBook appare la console GRUB invece del menu.
+Cause trovate e corrette:
+1. Il memdisk non veniva montato: mancano **memdisk.mod** e **tar.mod** nel
+   core image → device `(memdisk)` inesistente → `$prefix/grub.cfg` non
+   trovato → console. Fix: moduli aggiunti a `grub-mkimage`.
+2. `initrd-probe.cpio.gz` veniva scritto in `$W/` invece che in
+   `$W/esp/gbos/` → non finiva nell'ESP (il `linux` del menu avrebbe
+   comunque fallito). Fix: path corretto + `search --set=root --label GRUB`
+   nella cfg (dischi builtin nel kernel GRUB arm64-efi; `efidisk.mod` NON
+   esiste nel pacchetto Ubuntu arm64).
+3. Verifica in QEMU con AAVMF (`qemu-efi-aarch64`, disco come nvme):
+   menu → auto-boot 1s → `EFI stub: Booting Linux Kernel...` — catena
+   GRUB→kernel→DTB→initrd validata end-to-end (su `-M virt` il kernel mica
+   si ferma dopo, normale: non è hardware X1P).
+

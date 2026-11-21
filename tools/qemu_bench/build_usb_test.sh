@@ -36,7 +36,7 @@ gcc -static -O2 -o "$W/esp/gbos/probe" "$SRC/tools/qemu_bench/usb-test/probe.c"
 ls -la "$W/esp/gbos/probe"
 
 echo "== [4] initrd probe (cpio.gz) =="
-python3 - "$W/esp/gbos/probe" "$W/initrd-probe.cpio.gz" <<'PY'
+python3 - "$W/esp/gbos/probe" "$W/esp/gbos/initrd-probe.cpio.gz" <<'PY'
 import gzip, io, struct, sys
 probe = open(sys.argv[1], 'rb').read()
 entries = [('probe', 0o100755, probe), ('dev', 0o040755, b''),
@@ -65,6 +65,7 @@ cp "$V4/kernel.Image" "$W/esp/gbos/kernel.bin"
 cat > "$W/esp/gbos/grub.cfg" <<'CFG'
 set default=0
 set timeout=1
+search --no-floppy --set=root --label GRUB
 menuentry 'GBOS bring-up probe (mica/ThinkBook)' {
     linux /gbos/kernel.bin rdinit=/probe printk.devkmsg=on ignore_loglevel
     devicetree /gbos/dtb-lenovo.dtb
@@ -72,12 +73,9 @@ menuentry 'GBOS bring-up probe (mica/ThinkBook)' {
 }
 CFG
 
-echo "== [6] GRUB standalone =="
-"$W/prefix/usr/bin/grub-mkstandalone" -O arm64-efi \
-  --directory="$GDIR" \
-  --output="$W/esp/EFI/BOOT/BOOTAA64.EFI" \
-  "boot/grub/grub.cfg=$W/esp/gbos/grub.cfg"
+echo "== [6] GRUB core image (via build_grub_efi.sh) =="
 mkdir -p "$W/esp/EFI/BOOT"
+bash "$(dirname "$(readlink -f "$0")")/build_grub_efi.sh"
 ls -la "$W/esp/EFI/BOOT/BOOTAA64.EFI"
 
 echo "== [7] FAT images (ESP 256MiB + BOOTLOG 1GiB) =="
