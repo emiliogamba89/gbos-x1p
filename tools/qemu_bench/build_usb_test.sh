@@ -67,13 +67,24 @@ find . | "$W/prefix/usr/bin/cpio" -o -H newc --owner=0:0 2>/dev/null \
   | gzip -6 > "$W/esp/gbos/initrd-probe.cpio.gz"
 ls -la "$W/esp/gbos/initrd-probe.cpio.gz"
 
-echo "== [5] kernel + grub.cfg =="
+echo "== [5] kernel + grub.cfg (mica + ubuntu per confronto hardware) =="
 cp "$V4/kernel.Image" "$W/esp/gbos/kernel.bin"
+UBK="$W/lk/boot/vmlinuz-6.8.0-149-generic"
+if [ -s "$UBK" ]; then
+  cp "$UBK" "$W/esp/gbos/vmlinuz-ubuntu"
+  ls -la "$W/esp/gbos/vmlinuz-ubuntu"
+else
+  echo "kernel ubuntu assente: apt download linux-image-6.8.0-149-generic && dpkg-deb -x -> $W/lk" >&2
+fi
 cat > "$W/esp/gbos/grub.cfg" <<'CFG'
 set default=0
-set timeout=1
+set timeout=10
 search --no-floppy --set=root --label GRUB
-menuentry 'GBOS bring-up probe (mica/ThinkBook)' {
+menuentry 'TEST B: Ubuntu kernel 6.8 (ACPI, console video)' {
+    linux /gbos/vmlinuz-ubuntu rdinit=/probe ignore_loglevel console=tty0
+    initrd /gbos/initrd-probe.cpio.gz
+}
+menuentry 'TEST A: kernel mica + DTB Lenovo' {
     linux /gbos/kernel.bin rdinit=/probe printk.devkmsg=on ignore_loglevel panic=10 panic_print=1 maxcpus=1 earlycon=efi nokaslr
     devicetree /gbos/dtb-lenovo.dtb
     initrd /gbos/initrd-probe.cpio.gz
@@ -85,12 +96,15 @@ mkdir -p "$W/esp/EFI/BOOT"
 bash "$(dirname "$(readlink -f "$0")")/build_grub_efi.sh"
 ls -la "$W/esp/EFI/BOOT/BOOTAA64.EFI"
 
-echo "== [7] FAT images (ESP 256MiB + BOOTLOG 1GiB) =="
+echo "== [7] FAT ESP 256MiB + BOOTLOG ext4 1GiB =="
 "$W/prefix/usr/bin/mformat" -i "$W/esp.img" -C -T 524288 -h 255 -s 63 -v GRUB
 "$W/prefix/usr/bin/mcopy" -i "$W/esp.img" -s "$W/esp/EFI" "::EFI"
 "$W/prefix/usr/bin/mcopy" -i "$W/esp.img" -s "$W/esp/gbos" "::gbos"
 "$W/prefix/usr/bin/mdir" -i "$W/esp.img" ::/ | head -8
-"$W/prefix/usr/bin/mformat" -i "$W/log.img" -C -T 2097152 -h 255 -s 63 -v BOOTLOG
+# BOOTLOG in ext4: il kernel Ubuntu ha vfat come modulo (assente nel probe),
+# ext4 e' builtin -> il probe monta sda2 anche col kernel Ubuntu
+mke2fs -F -q -t ext4 -L BOOTLOG "$W/log.img" 1048576
+
 
 echo "== [8] usbdisk.img (MBR: p1 ESP 256MiB, p2 BOOTLOG 1GiB) =="
 python3 - "$W/esp.img" "$W/log.img" "$W/usbdisk.img" <<'PY'
@@ -106,7 +120,7 @@ mbr = bytearray(512)
 mbr[446] = 0x80
 mbr[446 + 4] = 0x0C
 struct.pack_into('<II', mbr, 446 + 8, p1_lba, p1_cnt)
-mbr[462 + 4] = 0x0B
+mbr[462 + 4] = 0x83
 struct.pack_into('<II', mbr, 462 + 8, p2_lba, p2_cnt)
 mbr[510:512] = b'\x55\xaa'
 with open(out, 'wb') as f:
