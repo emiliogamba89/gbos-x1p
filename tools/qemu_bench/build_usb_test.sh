@@ -18,12 +18,12 @@ fi
 
 echo "== [2] scarico/estraggo i tool (senza root) =="
 cd "$W"
-for p in grub-common grub-efi-arm64-bin mtools device-tree-compiler; do
+for p in grub-common grub-efi-arm64-bin mtools device-tree-compiler cpio; do
   ls "${p}_"*.deb >/dev/null 2>&1 || apt download "$p" >/dev/null 2>&1 || true
 done
 ls -la *.deb
-for p in grub-common grub-efi-arm64-bin mtools device-tree-compiler; do
-  dpkg-deb -x "${p}_"*_arm64.deb "$W/prefix"
+for p in grub-common grub-efi-arm64-bin mtools device-tree-compiler cpio; do
+  dpkg-deb -x "${p}_"*_arm64.deb "$W/prefix" 2>/dev/null || true
 done
 export PATH="$W/prefix/usr/bin:$PATH"
 export LD_LIBRARY_PATH="$W/prefix/usr/lib/aarch64-linux-gnu:$W/prefix/lib/aarch64-linux-gnu:${LD_LIBRARY_PATH:-}"
@@ -35,30 +35,15 @@ echo "== [3] probe init statico =="
 gcc -static -O2 -o "$W/esp/gbos/probe" "$SRC/tools/qemu_bench/usb-test/probe.c"
 ls -la "$W/esp/gbos/probe"
 
-echo "== [4] initrd probe (cpio.gz) =="
-python3 - "$W/esp/gbos/probe" "$W/esp/gbos/initrd-probe.cpio.gz" <<'PY'
-import gzip, io, struct, sys
-probe = open(sys.argv[1], 'rb').read()
-entries = [('probe', 0o100755, probe), ('dev', 0o040755, b''),
-           ('proc', 0o040755, b''), ('sys', 0o040755, b''),
-           ('tmp', 0o040755, b''), ('log', 0o040755, b'')]
-out = io.BytesIO()
-for name, mode, data in entries:
-    nlen = len(name) + 1
-    hdr = b'070701'
-    fields = [0, 0, mode, 0, 0, 0, len(data), 0, 0, 0, nlen, 0, 0]
-    hdr += b''.join(f'{v:08X}'.encode() for v in fields)
-    hdr += b'00000000'            # checksum
-    hdr += name.encode() + b'\x00'
-    while len(hdr) % 4: hdr += b'\x00'
-    out.write(hdr); out.write(data)
-    member_len = len(hdr) + len(data)
-    out.write(b"\x00" * ((4 - member_len % 4) % 4))
-out.write(b'070701' + b'0' * 120 + b'TRAILER!!!\x00')
-while len(out.getvalue()) % 4: out.write(b'\x00')
-open(sys.argv[2], 'wb').write(gzip.compress(out.getvalue(), 6))
-print('initrd probe ok')
-PY
+echo "== [4] initrd probe (cpio.gz, generato con cpio reale) =="
+rm -rf "$W/initrd-tree" && mkdir -p "$W/initrd-tree"
+cp "$W/esp/gbos/probe" "$W/initrd-tree/probe"
+chmod 755 "$W/initrd-tree/probe"
+cd "$W/initrd-tree"
+mkdir -p dev proc sys tmp log
+find . | "$W/prefix/usr/bin/cpio" -o -H newc --owner=0:0 2>/dev/null \
+  | gzip -6 > "$W/esp/gbos/initrd-probe.cpio.gz"
+ls -la "$W/esp/gbos/initrd-probe.cpio.gz"
 
 echo "== [5] kernel + grub.cfg =="
 cp "$V4/kernel.Image" "$W/esp/gbos/kernel.bin"

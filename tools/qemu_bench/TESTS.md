@@ -435,3 +435,31 @@ Cause trovate e corrette:
    GRUB→kernel→DTB→initrd validata end-to-end (su `-M virt` il kernel mica
    si ferma dopo, normale: non è hardware X1P).
 
+### Fix probe (2026-11-21, terzo round): log mancante su hardware
+
+Il probe non è mai stato testato prima (in QEMU il boot usava il vendor
+initramfs). Due bug trovati e corretti, validati in QEMU col kernel mica
+reale + usb-storage emulato (`test_probe_qemu.sh`):
+
+1. **cpio handwritten sbagliato**: campo `c_mode` al posto di `c_uid` e
+   trailer malformato (`b'0'*120` invece dei 13 campi da 8) → il kernel NON
+   riconosceva l'initramfs e passava al path legacy initrd → panic
+   `Unable to mount root fs` e `/probe` mai eseguito. Fix: generazione con
+   `cpio -o -H newc` reale (deb senza root, come gli altri tool).
+2. **polling rotto nel probe**: dopo `mknod`, `stat(/dev/sda2)` è sempre
+   vero (il nodo esiste come file) → il probe apriva il device prima che
+   lo scan SCSI registrasse le partizioni → `Can't open blockdev` → poweroff
+   senza log. Fix: polling su `/proc/partitions` (riga `sda2`), max 30 s;
+   nel log ora compare `sda2 registrato dal kernel: SI/NO`.
+
+Verifica QEMU completa: `Run /probe as init process` → `sda: sda1 sda2`
+a ~3.4 s → mount FAT → `gbos-probe.log` scritto in BOOTLOG (DT model,
+compatible, cpuinfo, partitions, dmesg) → poweroff. Kernel mica su virt:
+`CONFIG_MSDOS_PARTITION=y`, `CONFIG_DEVTMPFS` assente (mknod manuale
+corretto). Il probe gira quindi anche senza devtmpfs.
+
+Avvio del test su hardware: ora il log DEVE comparire in BOOTLOG. Se
+`sda2 registrato: NO` → il disco USB non è sda su quel hardware (cambiare
+device nel probe). Se BOOTLOG resta vuota → il kernel muore prima del
+mount dell'initramfs (probabile early-boot DT mismatch) → iterare sul DTB.
+

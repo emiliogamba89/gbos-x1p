@@ -37,10 +37,19 @@ int main(void) {
     mount("sysfs", "/sys", "sysfs", 0, NULL);
     mount("devtmpfs", "/dev", "devtmpfs", 0, NULL);
 
-    /* attende l'enumerazione USB (fino a 15 s) e crea il nodo a mano */
-    for (int i = 0; i < 30; i++) {
-        struct stat st;
-        if (stat("/dev/sda2", &st) == 0) break;
+    /* attende che il kernel registri sda2 (scan SCSI/USB + parsing MBR):
+     * senza devtmpfs serve polling su /proc/partitions, NON stat sul nodo
+     * (il nodo creato con mknod renderebbe sempre vero lo stat) */
+    int sda2_ok = 0;
+    for (int i = 0; i < 60; i++) {
+        char pbuf[8192];
+        int pf = open("/proc/partitions", O_RDONLY);
+        ssize_t pn = (pf >= 0) ? read(pf, pbuf, sizeof(pbuf) - 1) : -1;
+        if (pf >= 0) close(pf);
+        if (pn > 0) {
+            pbuf[pn] = 0;
+            if (strstr(pbuf, " sda2\n") || strstr(pbuf, " sda2\t")) { sda2_ok = 1; break; }
+        }
         mknod("/dev/sda2", S_IFBLK | 0600, makedev(8, 2));
         usleep(500000);
     }
@@ -48,6 +57,12 @@ int main(void) {
     logfd = open("/tmp/log.tmp", O_CREAT | O_WRONLY | O_TRUNC, 0644);
 
     wlog("=== GBOS bring-up probe (mica kernel su ThinkBook) ===\n");
+    {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "sda2 registrato dal kernel: %s\n",
+                 sda2_ok ? "SI" : "NO (timeout 30s)");
+        wlog(msg);
+    }
     dumpfile("/sys/firmware/devicetree/base/model", "DT model");
     dumpfile("/sys/firmware/devicetree/base/compatible", "DT compatible");
     dumpfile("/proc/cpuinfo", "cpuinfo");
@@ -67,18 +82,16 @@ int main(void) {
 
     /* copia su FAT: monta /dev/sda2 e trasferisce il file */
     mkdir("/log", 0755);
-    if (mount("/dev/sda2", "/log", "vfat", 0, NULL) == 0) {
-        char buf[65536];
-        int in = open("/tmp/log.tmp", O_RDONLY);
-        int out = open("/log/gbos-probe.log", O_CREAT | O_WRONLY | O_TRUNC, 0644);
-        if (in >= 0 && out >= 0) {
-            ssize_t n;
-            while ((n = read(in, buf, sizeof(buf))) > 0) write(out, buf, n);
-            fsync(out);
-        }
-    } else {
+    int mounted = mount("/dev/sda2", "/log", "vfat", 0, NULL) == 0;
+    if (!mounted) {
         /* fallback: prova direttamente su ext4 nel caso il log sia ext4 */
-        mount("/dev/sda2", "/log", "ext4", 0, NULL);
+        mounted = mount("/dev/sda2", "/log", "ext4", 0, NULL) == 0;
+    }
+    if (!mounted) {
+        char mmsg[64];
+        int mf = open("/tmp/mount.err", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+        if (mf >= 0) { write(mf, "mount fallito\n", 13); close(mf); }
+    } else {
         char buf[65536];
         int in = open("/tmp/log.tmp", O_RDONLY);
         int out = open("/log/gbos-probe.log", O_CREAT | O_WRONLY | O_TRUNC, 0644);
