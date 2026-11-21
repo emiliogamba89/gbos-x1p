@@ -28,7 +28,17 @@ DTB="$W/esp/gbos/dtb-lenovo.dtb"
 "$FDT" -t x "$DTB" /reserved-memory/ramoops@c0000000 reg - 0x0 0xc0000000 0x0 0x100000
 "$FDT" -t s "$DTB" /reserved-memory/ramoops@c0000000 compatible ramoops
 "$FDT" -t u "$DTB" /reserved-memory/ramoops@c0000000 record-size 4096 console-size 131072 ftrace-size 0 pmsg-size 4096 ecc-size 4096
-"$W/prefix/usr/bin/dtc" -I dtb -O dts "$DTB" 2>/dev/null | grep -A7 'ramoops@'
+
+echo "== [1c] no-map -> nomap-off (regioni firmware Dell/XBL/Gunyah inutili su ThinkBook) =="
+# le regioni no-map (gunyah-hyp, xbl, aop, cpucp, tme, uefi-log...) stanno a
+# inizio RAM (0x80000000-0x81d00000); il kernel GKI da 42MB caricato da
+# GRUB/EFI-stub puo' sovrapporvisi: la linear map le salta -> crash silenzioso
+# prima del primo printk. Per il probe restano riservate MA mappate.
+"$W/prefix/usr/bin/dtc" -I dtb -O dts "$DTB" 2>/dev/null > "$W/dtb-nomap.dts"
+python3 "$SRC/tools/qemu_bench/usb-test/filter_nomap.py" "$W/dtb-nomap.dts" "$W/dtb-clean.dts"
+"$W/prefix/usr/bin/dtc" -I dts -O dtb -o "$DTB" "$W/dtb-clean.dts" 2>&1 | grep -v Warning || true
+"$W/prefix/usr/bin/dtc" -I dtb -O dts "$DTB" 2>/dev/null | grep -c 'nomap-off;'
+"$W/prefix/usr/bin/dtc" -I dtb -O dts "$DTB" 2>/dev/null | grep -A3 'ramoops@'
 
 echo "== [2] scarico/estraggo i tool (senza root) =="
 cd "$W"
@@ -41,16 +51,14 @@ for p in grub-common grub-efi-arm64-bin mtools device-tree-compiler cpio; do
 done
 export PATH="$W/prefix/usr/bin:$PATH"
 export LD_LIBRARY_PATH="$W/prefix/usr/lib/aarch64-linux-gnu:$W/prefix/lib/aarch64-linux-gnu:${LD_LIBRARY_PATH:-}"
-GDIR=$(ls -d "$W"/prefix/usr/lib/grub/arm64-efi 2>/dev/null | head -1)
-echo "grub dir: $GDIR"; ls "$GDIR" | head -3
-"$W/prefix/usr/bin/dtc" --version 2>&1 | head -1 || true
 
 echo "== [3] probe init statico =="
-gcc -static -O2 -o "$W/esp/gbos/probe" "$SRC/tools/qemu_bench/usb-test/probe.c"
+gcc -O2 -static -o "$W/esp/gbos/probe" "$SRC/tools/qemu_bench/usb-test/probe.c" \
+  2>&1 | grep -E 'error|Error' || true
 ls -la "$W/esp/gbos/probe"
 
 echo "== [4] initrd probe (cpio.gz, generato con cpio reale) =="
-rm -rf "$W/initrd-tree" && mkdir -p "$W/initrd-tree"
+rm -rf "$W/initrd-tree"; mkdir -p "$W/initrd-tree"
 cp "$W/esp/gbos/probe" "$W/initrd-tree/probe"
 chmod 755 "$W/initrd-tree/probe"
 cd "$W/initrd-tree"
@@ -66,7 +74,7 @@ set default=0
 set timeout=1
 search --no-floppy --set=root --label GRUB
 menuentry 'GBOS bring-up probe (mica/ThinkBook)' {
-    linux /gbos/kernel.bin rdinit=/probe printk.devkmsg=on ignore_loglevel panic=10 panic_print=1 maxcpus=1
+    linux /gbos/kernel.bin rdinit=/probe printk.devkmsg=on ignore_loglevel panic=10 panic_print=1 maxcpus=1 earlycon=efi nokaslr
     devicetree /gbos/dtb-lenovo.dtb
     initrd /gbos/initrd-probe.cpio.gz
 }

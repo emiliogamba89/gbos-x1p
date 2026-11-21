@@ -463,3 +463,31 @@ Avvio del test su hardware: ora il log DEVE comparire in BOOTLOG. Se
 device nel probe). Se BOOTLOG resta vuota → il kernel muore prima del
 mount dell'initramfs (probabile early-boot DT mismatch) → iterare sul DTB.
 
+### Test hardware 2-3 (2026-11-21): panic invisibile → diagnosi no-map
+
+Test 2: menu GRUB ok, `poche righe a schermo` (= EFI stub; il kernel mica
+ha CONFIG_EFI_EARLYCON=y → a schermo appaiono anche i primi printk se la
+console arriva a registrarsi), riavvio automatico ~5 s = PANIC reale ma
+mai estratto (il boot2 muore allo stesso punto prima del probe).
+Test 3 (maxcpus=1): stub muti dopo `Exiting boot services...` → il kernel
+muore PRIMA del primo printk.
+
+Diagnosi: la DTB Lenovo ha ~49 regioni `no-map` a inizio RAM
+(0x80000000-0x81d00000: gunyah-hyp, hyp-elf, xbl, aop, cpucp, tme,
+uefi-log — firmware Qualcomm del Googlebook). Il kernel GKI da 42 MB
+caricato da GRUB/EFI-stub puo' sovrapporvisi: la linear map SALTA le
+regioni no-map → crash silenzioso pre-printk. Su ThinkBook (UEFI Insyde
+WoA, niente Gunyah/XBL attivi nel nostro boot) sono inutili.
+
+Fix nello step [1c] del build: `no-map;` → `nomap-off;` via
+`usb-test/filter_nomap.py` (la regione resta riservata ma MAPPATA nella
+linear map → niente skip, niente crash da overlap; 49 regioni convertite).
+Cmdline: `earlycon=efi` (console EFI visibile dal primo printk) + `nokaslr`
+(isola i crash da relocation). Il probe ora monta /sys/fs/pstore e scrive
+i file ramoops nel log → se il boot1 è pannicato, il boot2 espone il
+dmesg del panic dentro gbos-probe.log.
+
+Pipeline robusta: `run_usb_build_wsl.sh` copia gli script dal repo drxfs
+nel fs WSL (evita cache stale), verifica con grep, esegue il build e
+copia usbdisk.img su Windows.
+
